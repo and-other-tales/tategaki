@@ -217,7 +217,7 @@ class OptimizedPageSizeSelector:
         # Pre-defined column widths for optimal display
         table.add_column("#", style="cyan", width=3, justify="right")
         table.add_column("Format", style="green", width=15)
-        table.add_column("Size", style="blue", width=12, justify="center")
+        table.add_column("Size", style="blue", width=22, justify="center")
         table.add_column("Grid", style="magenta", width=18, justify="center")
         table.add_column("Description", style="yellow")
         
@@ -225,11 +225,19 @@ class OptimizedPageSizeSelector:
         for i, size in enumerate(self.COMMON_SIZES, 1):
             grid_info = ("Custom" if size["name"] == "Custom" 
                         else f"{size['grid']['columns']}×{size['grid']['rows']} ({size['characters_per_page']})")
+            
+            # Convert mm to inches (1 mm = 0.0393701 inches)
+            if size["name"] == "Custom":
+                size_info = "Custom"
+            else:
+                width_in = size['width'] * 0.0393701
+                height_in = size['height'] * 0.0393701
+                size_info = f"{size['width']}×{size['height']}mm ({width_in:.1f}\"×{height_in:.1f}\")"
                 
             table.add_row(
                 str(i), 
                 size["name"],
-                f"{size['width']}×{size['height']}mm", 
+                size_info,
                 grid_info,
                 size["description"]
             )
