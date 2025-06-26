@@ -1372,7 +1372,10 @@ class GenkouYoshiDocumentBuilder:
             
             # Set table-level properties for proper sizing and positioning
             tbl = table._tbl
-            tblPr = tbl.get_or_add_tblPr()
+            tblPr = tbl.tblPr
+            if tblPr is None:
+                tblPr = OxmlElement('w:tblPr')
+                tbl.insert(0, tblPr)
             
             # Set explicit table width to prevent overflow
             tblW = OxmlElement('w:tblW')
@@ -1408,7 +1411,10 @@ class GenkouYoshiDocumentBuilder:
                     
                     # Set cell properties
                     tc = cell._tc
-                    tcPr = tc.get_or_add_tcPr()
+                    tcPr = tc.tcPr
+                    if tcPr is None:
+                        tcPr = OxmlElement('w:tcPr')
+                        tc.insert(0, tcPr)
                     
                     # Set exact cell width
                     tcW = OxmlElement('w:tcW')
@@ -1445,7 +1451,10 @@ class GenkouYoshiDocumentBuilder:
                         run.font.color.rgb = RGBColor(0, 0, 0)  # Ensure black text
                     
                     # Set paragraph properties for proper Genkou Yoshi formatting
-                    pPr = p._p.get_or_add_pPr()
+                    pPr = p._p.pPr
+                    if pPr is None:
+                        pPr = OxmlElement('w:pPr')
+                        p._p.insert(0, pPr)
                     
                     # Center text horizontally within cell
                     jc = OxmlElement('w:jc')
@@ -1523,7 +1532,10 @@ class GenkouYoshiDocumentBuilder:
 
     def _set_vertical_text_direction(self, paragraph):
         """Set vertical text direction for paragraph"""
-        pPr = paragraph._p.get_or_add_pPr()
+        pPr = paragraph._p.pPr
+        if pPr is None:
+            pPr = OxmlElement('w:pPr')
+            paragraph._p.insert(0, pPr)
         text_dir = pPr.find(qn('w:textDirection'))
         if text_dir is None:
             text_dir = OxmlElement('w:textDirection')

@@ -14,11 +14,11 @@ import json
 
 # Import the modules to test
 from main import (
-    OptimizedGenkouYoshiGrid,
-    OptimizedJapaneseTextProcessor,
-    OptimizedGenkouYoshiDocumentBuilder
+    GenkouYoshiGrid,
+    JapaneseTextProcessor,
+    GenkouYoshiDocumentBuilder
 )
-from sizes import OptimizedPageSizeSelector
+from sizes import PageSizeSelector
 
 
 class TestOptimizedGenkouYoshiGrid(unittest.TestCase):
@@ -26,7 +26,7 @@ class TestOptimizedGenkouYoshiGrid(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures"""
-        self.grid = OptimizedGenkouYoshiGrid(squares_per_column=20, max_columns_per_page=10)
+        self.grid = GenkouYoshiGrid(squares_per_column=20, max_columns_per_page=10)
         
     def test_initialization(self):
         """Test grid initialization"""
@@ -42,7 +42,7 @@ class TestOptimizedGenkouYoshiGrid(unittest.TestCase):
             'grid': {'rows': 24, 'columns': 17},
             'margins': {'top': 15, 'bottom': 15, 'inner': 12, 'outer': 8}
         }
-        grid = OptimizedGenkouYoshiGrid(page_format=page_format)
+        grid = GenkouYoshiGrid(page_format=page_format)
         self.assertEqual(grid.squares_per_column, 24)
         self.assertEqual(grid.max_columns_per_page, 17)
         
@@ -74,9 +74,9 @@ class TestOptimizedGenkouYoshiGrid(unittest.TestCase):
         self.assertEqual(self.grid.current_column, 2)
         self.assertEqual(self.grid.current_square, 5)
         
-    def test_place_character_optimized(self):
-        """Test optimized character placement"""
-        self.grid.place_character_optimized('A')
+    def test_place_character(self):
+        """Test character placement"""
+        self.grid.place_character('A')
         # Check character was placed
         self.assertEqual(self.grid.current_page_grid[0][0], 'A')
         self.assertEqual(self.grid.current_square, 2)
@@ -95,15 +95,15 @@ class TestOptimizedGenkouYoshiGrid(unittest.TestCase):
         # Fill entire page
         for col in range(self.grid.max_columns_per_page):
             for square in range(self.grid.squares_per_column):
-                self.grid.place_character_optimized('A')
+                self.grid.place_character('A')
                 
         # This should trigger a new page
-        self.grid.place_character_optimized('B')
+        self.grid.place_character('B')
         self.assertEqual(self.grid.current_page, 2)
         
     def test_finish_page(self):
         """Test page finishing"""
-        self.grid.place_character_optimized('A')
+        self.grid.place_character('A')
         self.grid.finish_page()
         
         pages = self.grid.get_all_pages()
@@ -117,8 +117,8 @@ class TestOptimizedGenkouYoshiGrid(unittest.TestCase):
         self.assertFalse(self.grid.is_at_column_top())
 
 
-class TestOptimizedJapaneseTextProcessor(unittest.TestCase):
-    """Test cases for OptimizedJapaneseTextProcessor class"""
+class TestJapaneseTextProcessor(unittest.TestCase):
+    """Test cases for JapaneseTextProcessor class"""
     
     def test_identify_text_structure_with_metadata(self):
         """Test text structure identification with metadata"""
@@ -129,7 +129,7 @@ This is the first paragraph.
 
 This is the second paragraph."""
         
-        structure = OptimizedJapaneseTextProcessor.identify_text_structure(text)
+        structure = JapaneseTextProcessor.identify_text_structure(text)
         
         # Test should handle English text as well
         self.assertIsNotNone(structure['novel_title'])
@@ -144,7 +144,7 @@ Paragraph one
 
 Paragraph two"""
         
-        structure = OptimizedJapaneseTextProcessor.identify_text_structure(text)
+        structure = JapaneseTextProcessor.identify_text_structure(text)
         
         self.assertEqual(structure['novel_title'], 'Title')
         # Note: Author fallback logic expects author to be on line 2 only if line 2 is not a chapter
@@ -154,7 +154,7 @@ Paragraph two"""
     def test_preprocess_text_batch(self):
         """Test batch text preprocessing"""
         text = 'Hello "world" (test) 123'
-        processed = OptimizedJapaneseTextProcessor.preprocess_text_batch(text)
+        processed = JapaneseTextProcessor.preprocess_text(text)
         
         # Should convert to full-width
         self.assertIn('Ｈｅｌｌｏ', processed)
@@ -162,7 +162,7 @@ Paragraph two"""
     def test_number_rules(self):
         """Test number conversion rules"""
         text = "2023年12月25日 14:30"
-        processed = OptimizedJapaneseTextProcessor.preprocess_text_batch(text)
+        processed = JapaneseTextProcessor.preprocess_text(text)
         
         # Should convert dates and times appropriately
         self.assertIn('年', processed)
@@ -171,44 +171,44 @@ Paragraph two"""
         
     def test_character_checks(self):
         """Test character type checking methods"""
-        self.assertTrue(OptimizedJapaneseTextProcessor.is_punctuation('。'))
-        self.assertFalse(OptimizedJapaneseTextProcessor.is_punctuation('A'))
+        self.assertTrue(JapaneseTextProcessor.is_punctuation('。'))
+        self.assertFalse(JapaneseTextProcessor.is_punctuation('A'))
         
-        self.assertTrue(OptimizedJapaneseTextProcessor.is_small_kana('っ'))
-        self.assertFalse(OptimizedJapaneseTextProcessor.is_small_kana('A'))
+        self.assertTrue(JapaneseTextProcessor.is_small_kana('っ'))
+        self.assertFalse(JapaneseTextProcessor.is_small_kana('A'))
         
-        self.assertTrue(OptimizedJapaneseTextProcessor.is_opening_bracket('「'))
-        self.assertFalse(OptimizedJapaneseTextProcessor.is_opening_bracket('A'))
+        self.assertTrue(JapaneseTextProcessor.is_opening_bracket('「'))
+        self.assertFalse(JapaneseTextProcessor.is_opening_bracket('A'))
         
-        self.assertTrue(OptimizedJapaneseTextProcessor.is_closing_bracket('」'))
-        self.assertFalse(OptimizedJapaneseTextProcessor.is_closing_bracket('A'))
+        self.assertTrue(JapaneseTextProcessor.is_closing_bracket('」'))
+        self.assertFalse(JapaneseTextProcessor.is_closing_bracket('A'))
 
 
-class TestOptimizedPageSizeSelector(unittest.TestCase):
-    """Test cases for OptimizedPageSizeSelector class"""
+class TestPageSizeSelector(unittest.TestCase):
+    """Test cases for PageSizeSelector class"""
     
     def setUp(self):
         """Set up test fixtures"""
-        self.selector = OptimizedPageSizeSelector()
+        self.selector = PageSizeSelector()
         
     def test_get_format(self):
         """Test format retrieval"""
-        bunko = OptimizedPageSizeSelector.get_format('bunko')
+        bunko = PageSizeSelector.get_format('bunko')
         self.assertIsNotNone(bunko)
         self.assertEqual(bunko['name'], 'Bunko')
         
         # Test case insensitive
-        bunko_upper = OptimizedPageSizeSelector.get_format('BUNKO')
+        bunko_upper = PageSizeSelector.get_format('BUNKO')
         self.assertEqual(bunko, bunko_upper)
         
         # Test invalid format
-        invalid = OptimizedPageSizeSelector.get_format('invalid')
+        invalid = PageSizeSelector.get_format('invalid')
         self.assertIsNone(invalid)
         
     def test_calculate_grid_dimensions(self):
         """Test grid dimension calculation"""
         margins = {'top': 15, 'bottom': 15, 'inner': 12, 'outer': 8}
-        grid = OptimizedPageSizeSelector.calculate_grid_dimensions(111, 178, margins)
+        grid = PageSizeSelector.calculate_grid_dimensions(111, 178, margins)
         
         self.assertIsInstance(grid['columns'], int)
         self.assertIsInstance(grid['rows'], int)
@@ -217,12 +217,12 @@ class TestOptimizedPageSizeSelector(unittest.TestCase):
         self.assertEqual(grid['characters_per_page'], grid['columns'] * grid['rows'])
 
 
-class TestOptimizedGenkouYoshiDocumentBuilder(unittest.TestCase):
-    """Test cases for OptimizedGenkouYoshiDocumentBuilder class"""
+class TestGenkouYoshiDocumentBuilder(unittest.TestCase):
+    """Test cases for GenkouYoshiDocumentBuilder class"""
     
     def setUp(self):
         """Set up test fixtures"""
-        self.builder = OptimizedGenkouYoshiDocumentBuilder()
+        self.builder = GenkouYoshiDocumentBuilder()
         
     def test_initialization(self):
         """Test builder initialization"""
@@ -240,7 +240,7 @@ class TestOptimizedGenkouYoshiDocumentBuilder(unittest.TestCase):
             'characters_per_page': 600,
             'margins': {'top': 20, 'bottom': 20, 'inner': 15, 'outer': 12}
         }
-        builder = OptimizedGenkouYoshiDocumentBuilder(page_format=page_format)
+        builder = GenkouYoshiDocumentBuilder(page_format=page_format)
         self.assertEqual(builder.page_format, page_format)
         
     def test_convert_page_size_to_format(self):
@@ -269,7 +269,7 @@ class TestOptimizedGenkouYoshiDocumentBuilder(unittest.TestCase):
     def test_place_paragraph_optimized(self):
         """Test optimized paragraph placement"""
         initial_pos = (self.builder.grid.current_column, self.builder.grid.current_square)
-        self.builder.place_paragraph_optimized("Test paragraph.")
+        self.builder.place_paragraph("Test paragraph.")
         
         # Position should have advanced
         final_pos = (self.builder.grid.current_column, self.builder.grid.current_square)
@@ -305,7 +305,7 @@ Content of another chapter. Numbers like 2023/12/25 are also converted."""
         
     def test_end_to_end_document_creation(self):
         """Test complete document creation process"""
-        builder = OptimizedGenkouYoshiDocumentBuilder()
+        builder = GenkouYoshiDocumentBuilder()
         
         # Should not raise exceptions
         try:
@@ -317,16 +317,16 @@ Content of another chapter. Numbers like 2023/12/25 are also converted."""
             
     def test_docx_generation(self):
         """Test DOCX generation process"""
-        builder = OptimizedGenkouYoshiDocumentBuilder()
+        builder = GenkouYoshiDocumentBuilder()
         builder.create_genkou_yoshi_document(self.test_text)
         
         # Mock progress callback
         progress_calls = []
-        def mock_progress():
-            progress_calls.append(True)
+        def mock_progress(current_page, total_pages):
+            progress_calls.append((current_page, total_pages))
             
         try:
-            builder.generate_docx_content_optimized(progress_callback=mock_progress)
+            builder.generate_docx_content(progress_callback=mock_progress)
             self.assertGreater(len(progress_calls), 0)
         except Exception as e:
             self.fail(f"DOCX generation failed: {e}")
@@ -344,7 +344,7 @@ Content of another chapter. Numbers like 2023/12/25 are also converted."""
             self.assertEqual(content, self.test_text)
             
             # Test document processing
-            builder = OptimizedGenkouYoshiDocumentBuilder()
+            builder = GenkouYoshiDocumentBuilder()
             builder.create_genkou_yoshi_document(content)
             
             # Test DOCX saving
@@ -363,10 +363,10 @@ Content of another chapter. Numbers like 2023/12/25 are also converted."""
         
         for format_name in formats_to_test:
             with self.subTest(format=format_name):
-                page_format = OptimizedPageSizeSelector.get_format(format_name)
+                page_format = PageSizeSelector.get_format(format_name)
                 self.assertIsNotNone(page_format, f"Format {format_name} not found")
                 
-                builder = OptimizedGenkouYoshiDocumentBuilder(page_format=page_format)
+                builder = GenkouYoshiDocumentBuilder(page_format=page_format)
                 try:
                     builder.create_genkou_yoshi_document(self.test_text)
                     pages = builder.grid.get_all_pages()
@@ -380,7 +380,7 @@ class TestErrorHandling(unittest.TestCase):
     
     def test_empty_text_handling(self):
         """Test handling of empty text"""
-        builder = OptimizedGenkouYoshiDocumentBuilder()
+        builder = GenkouYoshiDocumentBuilder()
         try:
             builder.create_genkou_yoshi_document("")
             # Should not crash, but may create minimal document
@@ -391,7 +391,7 @@ class TestErrorHandling(unittest.TestCase):
     def test_very_long_text_handling(self):
         """Test handling of very long text"""
         long_text = "A" * 10000  # 10,000 characters
-        builder = OptimizedGenkouYoshiDocumentBuilder()
+        builder = GenkouYoshiDocumentBuilder()
         
         try:
             builder.create_genkou_yoshi_document(long_text)
@@ -403,7 +403,7 @@ class TestErrorHandling(unittest.TestCase):
     def test_special_characters_handling(self):
         """Test handling of special characters"""
         special_text = "Special chars: !@#$%^&*()_+-=[]{}|;:,.<>?"
-        builder = OptimizedGenkouYoshiDocumentBuilder()
+        builder = GenkouYoshiDocumentBuilder()
         
         try:
             builder.create_genkou_yoshi_document(special_text)
@@ -421,7 +421,7 @@ class TestErrorHandling(unittest.TestCase):
         
         # Should handle gracefully or use defaults
         try:
-            builder = OptimizedGenkouYoshiDocumentBuilder(page_format=invalid_format)
+            builder = GenkouYoshiDocumentBuilder(page_format=invalid_format)
             # Constructor should handle invalid values
         except Exception as e:
             # This might be expected behavior
