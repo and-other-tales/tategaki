@@ -913,7 +913,7 @@ class GenkouYoshiDocumentBuilder:
 
     def generate_docx_content(self, progress_callback=None):
         """Render the current grid state into the DOCX document as vertical (tategaki) text. Optionally call progress_callback after each page."""
-        from docx.shared import Pt
+        from docx.shared import Pt, Mm
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
@@ -921,6 +921,20 @@ class GenkouYoshiDocumentBuilder:
         while len(self.doc.paragraphs) > 0:
             p = self.doc.paragraphs[0]
             p._element.getparent().remove(p._element)
+        # Calculate available area for grid
+        page_width = self.page_format['width']
+        page_height = self.page_format['height']
+        margins = self.page_format['margins']
+        grid_cols = self.grid.max_columns_per_page
+        grid_rows = self.grid.squares_per_column
+        avail_width = page_width - margins['inner'] - margins['outer']
+        avail_height = page_height - margins['top'] - margins['bottom']
+        # Cell size: fit both width and height
+        cell_width = avail_width / grid_cols
+        cell_height = avail_height / grid_rows
+        cell_size = min(cell_width, cell_height)
+        # Font size: 70% of cell size (in points)
+        font_size_pt = cell_size * 0.7 * 2.83465  # mm to pt
         # For each page in the grid, create a table representing the grid
         for page in self.grid.get_all_pages():
             columns = self.grid.max_columns_per_page
@@ -928,7 +942,6 @@ class GenkouYoshiDocumentBuilder:
             table = self.doc.add_table(rows=rows, cols=columns)
             table.alignment = WD_TABLE_ALIGNMENT.CENTER
             # Set table style and cell size
-            cell_size = self.page_format.get('character_size', 8)  # mm
             for col in range(columns):
                 for row in range(rows):
                     cell = table.cell(row, col)
@@ -939,6 +952,7 @@ class GenkouYoshiDocumentBuilder:
                     w.set(qn('w:w'), str(int(cell_size * 56.7)))  # mm to twips
                     w.set(qn('w:type'), 'dxa')
                     tcPr.append(w)
+                    cell.width = Mm(cell_size)
                     cell.height = Mm(cell_size)
                     # Clear default paragraph
                     for p in cell.paragraphs:
@@ -952,7 +966,7 @@ class GenkouYoshiDocumentBuilder:
                         p = cell.paragraphs[0]
                         run = p.add_run(char)
                         run.font.name = self.font_name
-                        run.font.size = Pt(self.page_format.get('font_size', 12))
+                        run.font.size = Pt(font_size_pt)
                         self._set_vertical_text_direction(p)
                         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             # Add a page break after each page except the last
