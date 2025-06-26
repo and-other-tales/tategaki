@@ -26,7 +26,6 @@ Requires Python 3.8+ and the Noto Sans JP font installed on your system (supp
 git clone <repository>
 cd <repository>
 pip install -r requirements.txt
-pip install rich chardet
 # Install Noto Sans JP font on your system (e.g., Ubuntu/Debian: sudo apt install fonts-noto-sans-jp; macOS Homebrew: brew tap homebrew/cask-fonts && brew install --cask font-noto-sans-jp)
 ```
 
