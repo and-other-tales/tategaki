@@ -745,7 +745,7 @@ class OptimizedGenkouYoshiDocumentBuilder:
                 
             # Update progress for each page to show actual progress
             if progress_callback:
-                progress_callback()
+                progress_callback(page_idx + 1, len(pages))
 
     def _set_document_vertical_text_direction(self, section):
         """Set vertical text direction for document section"""
@@ -868,16 +868,21 @@ def main():
         # Main processing task
         task = progress.add_task("Processing document...", total=100)
         
-        # Document creation (much faster now)
-        progress.update(task, advance=70, description="Creating document structure...")
+        # Document creation (much less progress allocation)
+        progress.update(task, advance=30, description="Creating document structure...")
         builder.create_genkou_yoshi_document(text)
         
-        # DOCX generation
-        progress.update(task, advance=20, description="Generating DOCX...")
+        # DOCX generation gets more progress allocation for page-by-page updates
+        progress.update(task, advance=10, description="Preparing DOCX generation...")
         pages = builder.grid.get_all_pages()
         
-        def progress_callback():
-            progress.update(task, advance=1)
+        # Allocate remaining 60% for page-by-page generation
+        remaining_progress = 60
+        progress_per_page = remaining_progress / max(1, len(pages))
+        
+        def progress_callback(current_page, total_pages):
+            progress.update(task, advance=progress_per_page, 
+                          description=f"Generating DOCX... Page {current_page}/{total_pages}")
             
         builder.generate_docx_content_optimized(progress_callback=progress_callback)
         progress.update(task, completed=100)
