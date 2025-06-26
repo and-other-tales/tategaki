@@ -911,8 +911,8 @@ class GenkouYoshiDocumentBuilder:
             print(f"  {'[OK]' if passed else '[FAIL]'} {name}: {msg}")
         return test_results
 
-    def generate_docx_content(self):
-        """Render the current grid state into the DOCX document as vertical (tategaki) text."""
+    def generate_docx_content(self, progress_callback=None):
+        """Render the current grid state into the DOCX document as vertical (tategaki) text. Optionally call progress_callback after each page."""
         from docx.shared import Pt
         from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.oxml import OxmlElement
@@ -958,6 +958,8 @@ class GenkouYoshiDocumentBuilder:
             # Add a page break after each page except the last
             if page != self.grid.get_all_pages()[-1]:
                 self.doc.add_page_break()
+            if progress_callback:
+                progress_callback()
 
     def _set_document_vertical_text_direction(self, section):
         """Set vertical text direction for the document section (Word)."""
@@ -1100,9 +1102,20 @@ def main():
                 progress.update(task, advance=1)
         builder.grid.finish_page()
 
-    # Generate DOCX pages with progress bar
+    # Generate DOCX pages with real progress bar
     pages = builder.grid.get_all_pages()
-    builder.generate_docx_content()  # Generate DOCX content once, after all pages are processed
+    with Progress(
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TimeRemainingColumn(),
+        console=console,
+    ) as pg:
+        page_task = pg.add_task("Rendering DOCX pages...", total=len(pages))
+        # Patch generate_docx_content to accept a progress callback
+        def progress_callback():
+            pg.update(page_task, advance=1)
+        builder.generate_docx_content(progress_callback=progress_callback)
     output_path = Path(args.output) if args.output else input_path.with_name(input_path.stem + '_genkou_yoshi.docx')
     builder.doc.save(output_path)
     console.print()
