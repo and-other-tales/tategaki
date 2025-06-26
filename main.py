@@ -787,6 +787,7 @@ def main():
         "[cyan]░▀▄▀░▒█▒▒█▒█░█▄▄░█▀▄░▒█▒░█▀█▒█▄▄░█▄▄▒▄██[/cyan]"
     )
     console.print(ascii_art)
+    console.print("")
     console.print("[bold yellow]Japanese Tategaki DOCX Generator[/bold yellow]")
     console.print("[green]High-performance version for large documents[/green]")
     console.print()
