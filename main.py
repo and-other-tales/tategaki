@@ -993,7 +993,7 @@ def main():
     parser.add_argument("-o", "--output", help="Output DOCX file")
     parser.add_argument("--test", action="store_true", help="Run integrated tests and exit")
     parser.add_argument("--json", help="Export grid/character metadata as JSON to file")
-    parser.add_argument("--format", default="bunko", help="Page format (bunko, tankobon, shinsho, a5_standard, b6_standard, genkou_yoshi_20x20, custom)")
+    parser.add_argument("--format", default=None, help="Page format (bunko, tankobon, shinsho, a5_standard, b6_standard, genkou_yoshi_20x20, custom)")
     args = parser.parse_args()
 
     console = Console(color_system="auto", force_terminal=True, force_interactive=True)
@@ -1026,12 +1026,16 @@ def main():
         sys.exit(1)
 
     # Select page format
-    if args.format == "custom":
-        page_format = None
+    if args.format is None or args.format == "custom":
+        if PageSizeSelector and Prompt:
+            selector = PageSizeSelector(console=console)
+            page_format = selector.select_page_size()
+        else:
+            console.print("[bold red]Error: Interactive page size selection requires both 'rich.prompt' and 'sizes.py' (PageSizeSelector).[/bold red]", style="red")
+            sys.exit(1)
     else:
         try:
-            from sizes import PageSizeSelector
-            page_format = PageSizeSelector.get_format(args.format)
+            page_format = PageSizeSelector.get_format(args.format) if PageSizeSelector else None
         except Exception:
             page_format = None
 

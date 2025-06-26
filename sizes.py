@@ -241,33 +241,35 @@ class PageSizeSelector:
         """Prompt user to select a page size and return the dimensions with grid information"""
         self.show_sizes()
         self.console.print("\n[bold cyan]Select a page size format:[/bold cyan]")
-        
+
+        # Always use the provided console for Prompt.ask to ensure interactive input
         choice = Prompt.ask(
             "Enter selection",
             choices=[str(i) for i in range(1, len(self.COMMON_SIZES) + 1)],
-            default="1"  # Default to Bunko format
+            default="1",  # Default to Bunko format
+            console=self.console  # Force use of this console for input
         )
-        
+
         selected = self.COMMON_SIZES[int(choice) - 1].copy()
-        
+
         # Handle custom size
         if selected["name"] == "Custom":
             self.console.print("\n[bold cyan]Enter custom page dimensions:[/bold cyan]")
-            width = int(Prompt.ask("Width (mm)", default="111"))
-            height = int(Prompt.ask("Height (mm)", default="178"))
-            
+            width = int(Prompt.ask("Width (mm)", default="111", console=self.console))
+            height = int(Prompt.ask("Height (mm)", default="178", console=self.console))
+
             # Get margins
             self.console.print("\n[bold cyan]Enter margins:[/bold cyan]")
-            top = int(Prompt.ask("Top margin (mm)", default="15"))
-            bottom = int(Prompt.ask("Bottom margin (mm)", default="15"))
-            inner = int(Prompt.ask("Inner margin (mm)", default="12"))
-            outer = int(Prompt.ask("Outer margin (mm)", default="8"))
-            
+            top = int(Prompt.ask("Top margin (mm)", default="15", console=self.console))
+            bottom = int(Prompt.ask("Bottom margin (mm)", default="15", console=self.console))
+            inner = int(Prompt.ask("Inner margin (mm)", default="12", console=self.console))
+            outer = int(Prompt.ask("Outer margin (mm)", default="8", console=self.console))
+
             margins = {'top': top, 'bottom': bottom, 'inner': inner, 'outer': outer}
-            
+
             # Calculate optimal grid dimensions
             grid = self.calculate_grid_dimensions(width, height, margins)
-            
+
             custom_size = {
                 "name": "Custom", 
                 "width": width, 
@@ -278,15 +280,15 @@ class PageSizeSelector:
                 "description": "Custom user-defined format",
                 "character_size": grid['character_size']
             }
-            
+
             self.console.print(f"\n[bold green]Custom format:[/bold green] {width}×{height}mm with {grid['columns']}×{grid['rows']} grid")
             self.console.print(f"[bold green]Cell size:[/bold green] {grid['character_size']}mm, [bold green]Characters per page:[/bold green] {grid['characters_per_page']}")
-            
+
             return custom_size
-        
+
         self.console.print(f"\n[bold green]Selected:[/bold green] {selected['name']} ({selected['width']}×{selected['height']}mm)")
         self.console.print(f"[bold green]Grid:[/bold green] {selected['grid']['columns']}×{selected['grid']['rows']}, [bold green]Characters per page:[/bold green] {selected['characters_per_page']}")
-        
+
         return selected
 
 
