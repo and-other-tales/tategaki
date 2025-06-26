@@ -1102,17 +1102,7 @@ def main():
 
     # Generate DOCX pages with progress bar
     pages = builder.grid.get_all_pages()
-    with Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        TimeRemainingColumn(),
-        console=console,
-    ) as pg:
-        page_task = pg.add_task("Generating pages...", total=len(pages))
-        for _ in pages:
-            builder.generate_docx_content()
-            pg.update(page_task, advance=1)
+    builder.generate_docx_content()  # Generate DOCX content once, after all pages are processed
     output_path = Path(args.output) if args.output else input_path.with_name(input_path.stem + '_genkou_yoshi.docx')
     builder.doc.save(output_path)
     console.print()
