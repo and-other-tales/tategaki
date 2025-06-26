@@ -344,8 +344,7 @@ class GenkouYoshiDocumentBuilder:
         paragraphs_to_process = structure['body_paragraphs']
         for i, paragraph in enumerate(paragraphs_to_process):
             if paragraph == '':
-                self.grid.advance_column(1)
-                self.grid.place_character('＊　＊　＊')
+                # Scene break: leave one full empty column
                 self.grid.advance_column(1)
                 continue
             # Each new paragraph begins on 2nd square of new column
@@ -700,88 +699,115 @@ def main():
             print("Error: Input file is empty.", file=sys.stderr)
             sys.exit(1)
         processor = JapaneseTextProcessor()
-        structure = processor.identify_text_structure(text, paragraph_split_mode=args.paragraph_split)
-        print(f"Text analysis:")
-        print(f"  Novel title: {structure['novel_title']}")
-        print(f"  Subtitle (chapter): {structure['subtitle']}")
-        print(f"  Author: {structure['author']}")
+        structure = processor.identify_text_structure(
+            text,
+            paragraph_split_mode=args.paragraph_split
+        )
+        console = Console(color_system="auto", force_terminal=True, force_interactive=True)
+        console.print("[cyan]░▄▀▄░▀█▀░█▄█▒██▀▒█▀▄░▀█▀▒▄▀▄░█▒░▒██▀░▄▀▀[/cyan]")
+        console.print("[cyan]░▀▄▀░▒█▒▒█▒█░█▄▄░█▀▄░▒█▒░█▀█▒█▄▄░█▄▄▒▄██[/cyan]")
+        for line in __doc__.strip().splitlines():
+            console.print(f"[bold yellow]{line}[/bold yellow]")
+        console.print()
+        console.print("[bold cyan]Text analysis:[/bold cyan]")
+        console.print(f"  [bold]Novel title:[/bold] {structure['novel_title']}")
+        console.print(f"  [bold]Subtitle (chapter):[/bold] {structure['subtitle']}")
+        console.print(f"  [bold]Author:[/bold] {structure['author']}")
         if structure['subheadings']:
-            print(f"  Chapters detected: {len(structure['subheadings'])}")
             total_paragraphs = sum(len(pars) for _, pars in structure['subheadings'])
+            console.print(f"  [bold]Chapters detected:[/bold] {len(structure['subheadings'])}")
             for i, (chapter, paragraphs) in enumerate(structure['subheadings'], 1):
                 display_chapter = re.sub(r'^第[^章]*章[:：]?\s*', '', chapter)
-                print(f"    Chapter {i}: '{display_chapter}' ({len(paragraphs)} paragraphs)")
-            print(f"  Total paragraphs: {total_paragraphs}")
-            print(f"  Processing all {total_paragraphs} paragraphs for {args.columns}-column layout...")
+                console.print(
+                    f"    [bold magenta]Chapter {i}:[/bold magenta] '{display_chapter}' ({len(paragraphs)} paragraphs)"
+                )
+            console.print(f"  [bold]Total paragraphs:[/bold] {total_paragraphs}")
+            console.print(
+                f"  [bold]Processing all {total_paragraphs} paragraphs for {args.columns}-column layout...[/bold]"
+            )
         else:
             total_paragraphs = len(structure['body_paragraphs'])
-            print(f"  Total paragraphs: {total_paragraphs}")
-            print(f"  Processing all {total_paragraphs} paragraphs for {args.columns}-column layout...")
+            console.print(f"  [bold]Total paragraphs:[/bold] {total_paragraphs}")
+            console.print(
+                f"  [bold]Processing all {total_paragraphs} paragraphs for {args.columns}-column layout...[/bold]"
+            )
         if structure['subheadings'] and total_paragraphs <= 1:
-            print("Warning: Only one paragraph detected in chapters. Check your input or paragraph split mode.")
+            console.print(
+                "[bold yellow]Warning:[/bold yellow] "
+                "Only one paragraph detected in chapters. Check your input or paragraph split mode."
+            )
         if not structure['subheadings'] and len(structure['body_paragraphs']) <= 1:
-            print("Warning: Only one paragraph detected in body. Check your input or paragraph split mode.")
+            console.print(
+                "[bold yellow]Warning:[/bold yellow] "
+                "Only one paragraph detected in body. Check your input or paragraph split mode."
+            )
         builder = GenkouYoshiDocumentBuilder(
             font_name=args.font,
             squares_per_column=args.squares,
             max_columns_per_page=args.columns,
             chapter_pagebreak=args.chapter_pagebreak
         )
-        console = Console()
         progress = Progress(
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TaskProgressColumn(),
             TimeRemainingColumn(),
             console=console,
-            disable=True,
+            auto_refresh=False,
         )
-        status_panel = Panel("", height=5, title="Status")
-        with Live(Group(status_panel, progress), refresh_per_second=4, console=console) as live:
-            with progress:
-                task = progress.add_task("Processing paragraphs...", total=total_paragraphs)
-                if structure['subheadings']:
-                    for idx, (chapter, paragraphs) in enumerate(structure['subheadings']):
-                        if args.chapter_pagebreak and idx > 0:
-                            builder.grid.finish_page()
-                        status_panel = Panel(chapter, height=5, title="Status")
-                        live.update(Group(status_panel, progress), refresh=False)
-                        builder.place_subheading(chapter)
-                        for i, paragraph in enumerate(paragraphs):
-                            if paragraph == '':
-                                builder.grid.advance_column(1)
-                                builder.grid.place_character('＊　＊　＊')
-                                builder.grid.advance_column(1)
-                                progress.update(task, advance=1)
-                                continue
-                            if i > 0:
-                                builder.grid.advance_column(2)
-                            status_panel = Panel(paragraph, height=5, title="Status")
-                            live.update(Group(status_panel, progress), refresh=False)
-                            builder.place_paragraph(paragraph)
-                            progress.update(task, advance=1)
-                else:
-                    paragraphs = structure['body_paragraphs']
+        status_panel = Panel("", height=5, title="Status", expand=True)
+        panel_group = Group(status_panel, progress)
+        with Live(panel_group, refresh_per_second=4, auto_refresh=False,
+                  console=console, transient=False) as live:
+            task = progress.add_task("Processing paragraphs...", total=total_paragraphs)
+            if structure['subheadings']:
+                for idx, (chapter, paragraphs) in enumerate(structure['subheadings']):
+                    if args.chapter_pagebreak and idx > 0:
+                        builder.grid.finish_page()
+                    status_panel.renderable = chapter
+                    live.update(panel_group, refresh=True)
+                    builder.place_subheading(chapter)
                     for i, paragraph in enumerate(paragraphs):
-                        if paragraph == '':
-                            builder.grid.advance_column(1)
-                            builder.grid.place_character('＊　＊　＊')
+                        if paragraph == "":
                             builder.grid.advance_column(1)
                             progress.update(task, advance=1)
                             continue
                         if i > 0:
                             builder.grid.advance_column(2)
-                        status_panel = Panel(paragraph, height=5, title="Status")
-                        live.update(Group(status_panel, progress), refresh=False)
+                        status_panel.renderable = paragraph
+                        live.update(panel_group, refresh=True)
                         builder.place_paragraph(paragraph)
                         progress.update(task, advance=1)
+            else:
+                paragraphs = structure['body_paragraphs']
+                for i, paragraph in enumerate(paragraphs):
+                    if paragraph == "":
+                        builder.grid.advance_column(1)
+                        progress.update(task, advance=1)
+                        continue
+                    if i > 0:
+                        builder.grid.advance_column(2)
+                    status_panel.renderable = paragraph
+                    live.update(panel_group, refresh=True)
+                    builder.place_paragraph(paragraph)
+                    progress.update(task, advance=1)
+            builder.grid.finish_page()
 
-                builder.grid.finish_page()
-                builder.generate_docx_content(progress, task)
-
+        # Generate DOCX pages with progress bar
+        pages = builder.grid.get_all_pages()
+        with Progress(
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=console,
+        ) as pg:
+            page_task = pg.add_task("Generating pages...", total=None)
+            builder.generate_docx_content(pg, page_task)
+        # Save document
         builder.save_document(output_path)
-        print()
-        print(f"DOCX file saved to: {output_path}")
+        console.print()
+        console.print(f"[bold green]DOCX file saved to:[/bold green] {output_path}")
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
