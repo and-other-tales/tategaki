@@ -15,7 +15,10 @@ Convert Japanese plain text into a properly formatted vertical Genkō Yōshi (�
   - Larger numbers in full-width Arabic digits (１５, １００).
   - Dates in 年月日 format (e.g. ２０２３年十月五日).
   - Times in 時分 notation (e.g. 九時３０分).
-- Customizable grid: columns per page and squares per column.
+- Multiple Japanese book formats: select from standard sizes including A4, A5, B5, B6, A6, Bunko (111×178mm), and custom sizes.
+- Dynamic grid sizing: optimal grid dimensions calculated automatically based on page size.
+- Interactive page size selection: choose your preferred format via simple arrow-key interface.
+- Customizable grid: manual control over columns per page and squares per column if desired.
 - Automatic page numbering with half-width Arabic numerals at top outer margin (odd pages right, even pages left).
 
 ## Installation
@@ -41,14 +44,35 @@ python main.py [OPTIONS] INPUT_FILE.txt
 |----------------------:|:----------------------------------------------------------------------------|
 | `-o`, `--output`      | Output DOCX file path (default: `<input>_genkou_yoshi.docx`)                 |
 | `-a`, `--author`      | Author name (if not specified in text)                                       |
-| `--font`              | Font name for DOCX output (default: `Noto Sans JP`)                           |
-| `--columns`           | Number of columns per page (default: 5)                                      |
+| `--font`              | Font name for DOCX output (default: `Noto Sans JP`)                          |
+| `--columns`           | Number of columns per page (auto-calculated based on page size if not specified) |
 | `--squares`           | Number of squares per column (default: 12)                                   |
 | `--paragraph-split`   | Paragraph split mode: `blank` (default) or `single`                          |
 | `--chapter-pagebreak` | Insert a page break before each chapter                                      |
+| `--page-size`         | Page size format: `a4`, `a5`, `a6`, `b5`, `b6`, `bunko`, `custom_bunko`, `tankobon`, `shinsho`, `genkou_yoshi_20x20`, `genkou_yoshi_10x20`, or `custom` |
+| `--width`             | Custom page width in mm (only used with `--page-size=custom`)                |
+| `--height`            | Custom page height in mm (only used with `--page-size=custom`)               |
+| `--non-interactive`   | Skip interactive page size selection prompt                                 |
 
-## Example
+## Examples
+
+Interactive page size selection (recommended):
 
 ```bash
-python main.py my_novel.txt -o novel_genkou.docx --columns 5 --squares 12
+python main.py my_novel.txt -o novel_genkou.docx
 ```
+
+Using command-line options:
+
+```bash
+# Using Bunko format (traditional Japanese paperback)
+python main.py my_novel.txt --page-size=bunko
+
+# Using A4 format with custom grid dimensions
+python main.py my_novel.txt --page-size=a4 --columns 10 --squares 15
+
+# Using custom page dimensions
+python main.py my_novel.txt --page-size=custom --width 148 --height 210 --squares 13
+```
+
+The grid dimensions (columns and squares) are automatically optimized based on the selected page size.
