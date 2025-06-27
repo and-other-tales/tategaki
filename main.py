@@ -715,8 +715,23 @@ class VerificationEngine:
                 
                 # Only regenerate if fixes were actually applied
                 if fixes_report['total_fixes'] > 0:
-                    with self.console.status("Regenerating DOCX with fixes..."):
-                        self.builder.generate_docx_content()
+                    # Create progress bar for DOCX regeneration
+                    with Progress(
+                        TextColumn("[bold blue]Regenerating DOCX with fixes..."),
+                        BarColumn(bar_width=40),
+                        TaskProgressColumn(),
+                        TimeRemainingColumn(),
+                        console=self.console,
+                        transient=False
+                    ) as progress:
+                        task = progress.add_task("regeneration", total=100)
+                        
+                        def progress_callback(current_page, total_pages):
+                            progress_percent = int((current_page / total_pages) * 100)
+                            progress.update(task, completed=progress_percent)
+                        
+                        self.builder.generate_docx_content(progress_callback=progress_callback)
+                        progress.update(task, completed=100)
                         self.builder.doc.save(docx_path)
                 else:
                     self.console.print("[yellow]No fixes applied, stopping verification[/yellow]")
