@@ -656,6 +656,8 @@ class VerificationEngine:
         
         iteration = 0
         final_report = {}
+        previous_violations = None
+        stagnant_iterations = 0
         
         while iteration < max_iterations:
             iteration += 1
@@ -691,28 +693,45 @@ class VerificationEngine:
                 }
                 break
             
-            # Apply fixes if not the last iteration
-            if iteration < max_iterations:
+            # Check if violations have changed since last iteration
+            current_violations = self._get_violation_signature(validation_report['all_violations'])
+            if previous_violations and current_violations == previous_violations:
+                stagnant_iterations += 1
+                self.console.print(f"[yellow]Warning: Same violations detected for {stagnant_iterations} iteration(s)[/yellow]")
+                
+                # Stop if we're stuck in a loop
+                if stagnant_iterations >= 2:
+                    self.console.print("[red]Stopping verification: violations not improving[/red]")
+                    break
+            else:
+                stagnant_iterations = 0
+            
+            # Apply fixes only if we have violations and they're potentially fixable
+            if validation_report['total_violations'] > 0 and stagnant_iterations < 2:
                 with self.console.status("Applying compliance fixes..."):
                     fixes_report = self.adjuster.apply_fixes(validation_report['all_violations'])
                 
                 self._display_fixes_report(fixes_report)
                 
-                # Regenerate DOCX with fixes
-                with self.console.status("Regenerating DOCX with fixes..."):
-                    self.builder.generate_docx_content()
-                    self.builder.doc.save(docx_path)
-            else:
-                # Final iteration - report remaining issues
-                final_report = {
-                    'status': 'partial_compliance',
-                    'iterations': iteration,
-                    'final_score': validation_report['compliance_score'],
-                    'remaining_violations': validation_report['total_violations'],
-                    'validation_report': validation_report
-                }
+                # Only regenerate if fixes were actually applied
+                if fixes_report['total_fixes'] > 0:
+                    with self.console.status("Regenerating DOCX with fixes..."):
+                        self.builder.generate_docx_content()
+                        self.builder.doc.save(docx_path)
+                else:
+                    self.console.print("[yellow]No fixes applied, stopping verification[/yellow]")
+                    break
+            
+            previous_violations = current_violations
         
-        return final_report
+        # If we reach here, we've exceeded max iterations without achieving compliance
+        return {
+            'status': 'partial_compliance',
+            'iterations': iteration,
+            'final_score': validation_report.get('compliance_score', 0),
+            'remaining_violations': validation_report.get('total_violations', 0),
+            'validation_report': validation_report
+        }
     
     def _display_validation_report(self, report: Dict, iteration: int):
         """Display validation report in formatted table"""
@@ -778,6 +797,19 @@ class VerificationEngine:
         fixes_table.add_row("Total", f"[bold]{fixes_report['total_fixes']}[/bold]")
         
         self.console.print(fixes_table)
+    
+    def _get_violation_signature(self, violations: List[Dict]) -> str:
+        """Create a unique signature for violations to detect repetition"""
+        if not violations:
+            return ""
+        
+        # Create signature based on violation types, locations, and messages
+        signature_parts = []
+        for violation in sorted(violations, key=lambda v: (v.get('type', ''), v.get('page', 0), v.get('column', 0), v.get('row', 0))):
+            signature_part = f"{violation.get('type', '')}:{violation.get('page', '')}:{violation.get('column', '')}:{violation.get('row', '')}"
+            signature_parts.append(signature_part)
+        
+        return "|".join(signature_parts)
 
 
 class GenkouYoshiGrid:
