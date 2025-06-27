@@ -1775,7 +1775,11 @@ def main():
         builder.generate_docx_content(progress_callback=progress_callback)
         
         # Save initial version
-        output_path = Path(args.output) if args.output else input_path.with_name(input_path.stem + '_genkou_yoshi.docx')
+        if args.output:
+            output_path = Path(args.output)
+        else:
+            format_name = page_format.get('name', 'genkou_yoshi') if page_format else 'genkou_yoshi'
+            output_path = input_path.with_name(f"{input_path.stem}_{format_name}.docx")
         builder.doc.save(output_path)
         
         progress.update(task, advance=20, description="Document saved, preparing verification...")

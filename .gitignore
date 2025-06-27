@@ -9,6 +9,7 @@ master.txt
 # Distribution / packaging
 .Python
 build/
+*.docx
 develop-eggs/
 dist/
 downloads/
