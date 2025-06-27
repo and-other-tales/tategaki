@@ -8,7 +8,7 @@ from rich.prompt import Prompt
 from rich.table import Table
 from rich import box
 
-class OptimizedPageSizeSelector:
+class PageSizeSelector:
     """Optimized page size selector with pre-computed dimensions and fast lookups"""
     
     # Pre-computed Japanese book formats with all calculations done once
@@ -305,15 +305,14 @@ class OptimizedPageSizeSelector:
         return selected
 
 
-# Maintain backward compatibility
-PageSizeSelector = OptimizedPageSizeSelector
+# Class is now directly named PageSizeSelector for consistency
 
 # Example usage when run directly
 if __name__ == "__main__":
     import time
     start_time = time.time()
     
-    selector = OptimizedPageSizeSelector()
+    selector = PageSizeSelector()
     selected_size = selector.select_page_size()
     
     end_time = time.time()

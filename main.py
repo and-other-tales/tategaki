@@ -119,19 +119,28 @@ class GenkouYoshiValidator:
         for page_num, page_data in grid_data.items():
             for col_num, col_data in page_data.get('columns', {}).items():
                 for row_num, char in col_data.items():
-                    # Check period and comma placement (should be upper-right)
+                    # Check period and comma placement (should be upper-right in tategaki)
                     if char in self.PERIOD_COMMA_CHARS:
-                        # Note: In actual implementation, we'd check cell alignment
-                        # For now, we'll flag for manual review
-                        violations.append({
-                            'type': 'punctuation_alignment',
-                            'page': page_num,
-                            'column': col_num,
-                            'row': row_num,
-                            'character': char,
-                            'message': f'Period/comma "{char}" must be placed in upper-right quadrant',
-                            'severity': 'medium'
-                        })
+                        # In proper tategaki, periods and commas should be positioned in upper-right
+                        # For DOCX validation, we check if they appear in expected positions
+                        # This is a formatting guideline rather than a critical error
+                        # Skip validation for now as DOCX doesn't support sub-cell positioning
+                        pass
+                    
+                    # Check for question and exclamation marks that need special handling
+                    if char in self.QUESTION_EXCLAMATION_CHARS:
+                        # These should be properly oriented for tategaki
+                        # The text processor should have already converted them to vertical forms
+                        if char in ['?', '!']:  # ASCII versions shouldn't appear
+                            violations.append({
+                                'type': 'ascii_punctuation',
+                                'page': page_num,
+                                'column': col_num,
+                                'row': row_num,
+                                'character': char,
+                                'message': f'ASCII punctuation "{char}" should be converted to vertical form',
+                                'severity': 'medium'
+                            })
         
         return violations
     
@@ -168,21 +177,47 @@ class GenkouYoshiValidator:
         return violations
     
     def validate_character_placement(self, grid_data: Dict) -> List[Dict]:
-        """Validate one character per cell rule"""
+        """Validate one character per cell rule and proper character encoding"""
         violations = []
         
         for page_num, page_data in grid_data.items():
             for col_num, col_data in page_data.get('columns', {}).items():
                 for row_num, char in col_data.items():
-                    if len(char) != 1:
+                    # Check for empty cells
+                    if not char or char.isspace():
+                        continue
+                        
+                    # Count visual characters (handling combining characters properly)
+                    import unicodedata
+                    # Normalize to handle combining characters
+                    normalized = unicodedata.normalize('NFC', char)
+                    # Count grapheme clusters (visible characters)
+                    visual_length = len(normalized)
+                    
+                    # Check for multi-character content (excluding single combining chars)
+                    if visual_length > 1:
+                        # Allow some combining characters but flag true multi-character content
+                        if not all(unicodedata.category(c).startswith('M') for c in normalized[1:]):
+                            violations.append({
+                                'type': 'multi_character_cell',
+                                'page': page_num,
+                                'column': col_num,
+                                'row': row_num,
+                                'content': char,
+                                'message': f'Cell contains "{char}" ({visual_length} characters), should contain exactly 1 character',
+                                'severity': 'critical'
+                            })
+                    
+                    # Check for invalid control characters
+                    if any(unicodedata.category(c) in ['Cc', 'Cf'] for c in char):
                         violations.append({
-                            'type': 'multi_character_cell',
+                            'type': 'invalid_control_character',
                             'page': page_num,
                             'column': col_num,
                             'row': row_num,
-                            'content': char,
-                            'message': f'Cell contains "{char}" (length {len(char)}), should contain exactly 1 character',
-                            'severity': 'critical'
+                            'content': repr(char),
+                            'message': f'Cell contains invalid control character: {repr(char)}',
+                            'severity': 'high'
                         })
         
         return violations
@@ -328,41 +363,37 @@ class DocxAnalyzer:
         }
     
     def extract_grid_data(self) -> Dict:
-        """Extract character grid data from tables"""
+        """Extract character grid data from tables with proper tategaki coordinate mapping"""
         if not self.doc:
             return {}
         
         grid_data = {}
         page_num = 1
         
-        for element in self.doc.element.body:
-            # Look for tables (our grids)
-            if element.tag.endswith('tbl'):
-                page_data = {'columns': {}}
-                
-                # Parse table rows and cells
-                rows = element.xpath('.//w:tr', namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
-                
-                for row_idx, row in enumerate(rows):
-                    cells = row.xpath('.//w:tc', namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
+        for table in self.doc.tables:
+            page_data = {'columns': {}}
+            
+            # For tategaki: columns are DOCX table columns, rows are DOCX table rows
+            # This matches the generation logic in generate_docx_content
+            for row_idx, row in enumerate(table.rows):
+                for col_idx, cell in enumerate(row.cells):
+                    # Extract text from cell
+                    cell_text = cell.text.strip()
                     
-                    for col_idx, cell in enumerate(cells):
-                        # Extract text from cell
-                        text_elements = cell.xpath('.//w:t', namespaces={'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'})
-                        cell_text = ''.join(elem.text or '' for elem in text_elements)
+                    if cell_text:  # Only record non-empty cells
+                        # Tategaki column mapping: col_idx + 1 = tategaki column
+                        # Tategaki row mapping: row_idx + 1 = position within column
+                        tategaki_col = col_idx + 1
+                        tategaki_row = row_idx + 1
                         
-                        if cell_text.strip():  # Only record non-empty cells
-                            col_num = col_idx + 1
-                            row_num = row_idx + 1
-                            
-                            if col_num not in page_data['columns']:
-                                page_data['columns'][col_num] = {}
-                            
-                            page_data['columns'][col_num][row_num] = cell_text.strip()
-                
-                if page_data['columns']:  # Only add pages with content
-                    grid_data[page_num] = page_data
-                    page_num += 1
+                        if tategaki_col not in page_data['columns']:
+                            page_data['columns'][tategaki_col] = {}
+                        
+                        page_data['columns'][tategaki_col][tategaki_row] = cell_text
+            
+            if page_data['columns']:  # Only add pages with content
+                grid_data[page_num] = page_data
+                page_num += 1
         
         return grid_data
     
@@ -436,25 +467,88 @@ class DocumentAdjuster:
     def _rebuild_column_with_kinsoku(self, page_num: int, col_num: int, violations: List[Dict]) -> bool:
         """Rebuild column content applying proper 禁則処理"""
         try:
-            # Get current column content
+            # Get current page grid data
             pages = self.builder.grid.get_all_pages()
             if page_num - 1 >= len(pages):
                 return False
             
             page_data = pages[page_num - 1]
-            col_data = page_data['columns'].get(col_num, {})
             
-            if not col_data:
-                return False
+            # Fix gyoutou_kinsoku violations by moving prohibited characters to previous column
+            for violation in violations:
+                if violation['type'] == 'gyoutou_kinsoku':
+                    prohibited_char = violation['character']
+                    current_col = violation['column']
+                    
+                    # Get current column data
+                    current_col_data = page_data['columns'].get(current_col, {})
+                    if not current_col_data:
+                        continue
+                    
+                    # Find the prohibited character at the start of the column
+                    sorted_rows = sorted(current_col_data.keys())
+                    if sorted_rows and current_col_data[sorted_rows[0]] == prohibited_char:
+                        # Remove from current column start
+                        del current_col_data[sorted_rows[0]]
+                        
+                        # Shift all remaining characters up one position
+                        new_col_data = {}
+                        for i, row_key in enumerate(sorted_rows[1:], 1):
+                            new_col_data[i] = current_col_data[row_key]
+                        page_data['columns'][current_col] = new_col_data
+                        
+                        # Try to add to previous column end
+                        prev_col = current_col - 1
+                        if prev_col >= 1:
+                            prev_col_data = page_data['columns'].get(prev_col, {})
+                            if prev_col_data:
+                                # Find the last occupied row in previous column
+                                prev_sorted_rows = sorted(prev_col_data.keys())
+                                if prev_sorted_rows:
+                                    last_row = prev_sorted_rows[-1]
+                                    # Add prohibited character to end of previous column if space allows
+                                    if last_row < self.builder.grid.squares_per_column:
+                                        prev_col_data[last_row + 1] = prohibited_char
+                                        page_data['columns'][prev_col] = prev_col_data
+                                    else:
+                                        # Previous column is full, need to create new column
+                                        # Insert character at start of current column again (will be fixed in next iteration)
+                                        if current_col_data:
+                                            new_col_data = {1: prohibited_char}
+                                            for row_key, char in current_col_data.items():
+                                                new_col_data[row_key + 1] = char
+                                            page_data['columns'][current_col] = new_col_data
+                                        else:
+                                            page_data['columns'][current_col] = {1: prohibited_char}
+                            else:
+                                # Previous column is empty, just add the character
+                                page_data['columns'][prev_col] = {1: prohibited_char}
+                        else:
+                            # No previous column, character stays but will be handled differently
+                            if not page_data['columns'].get(current_col):
+                                page_data['columns'][current_col] = {}
+                            page_data['columns'][current_col][1] = prohibited_char
             
-            # Extract characters in order
-            chars = [col_data[i] for i in sorted(col_data.keys())]
+            # Update the builder's grid with the fixed data
+            if page_num - 1 < len(self.builder.grid.pages):
+                self.builder.grid.pages[page_num - 1] = page_data
             
-            # Apply kinsoku processing
-            fixed_chars = self._apply_kinsoku_processing(chars)
+            # If this is the current page, also update the current page grid
+            if page_num == self.builder.grid.current_page:
+                # Convert back to list format for the current page grid
+                new_grid = [['' for _ in range(self.builder.grid.squares_per_column)] 
+                           for _ in range(self.builder.grid.max_columns_per_page)]
+                
+                for col_num, col_data in page_data['columns'].items():
+                    col_idx = col_num - 1
+                    if 0 <= col_idx < len(new_grid):
+                        for row_num, char in col_data.items():
+                            row_idx = row_num - 1
+                            if 0 <= row_idx < len(new_grid[col_idx]):
+                                new_grid[col_idx][row_idx] = char
+                
+                self.builder.grid.current_page_grid = new_grid
             
-            # Update the grid (this is a simplified approach)
-            # In a real implementation, we'd need to update the actual grid structure
             logging.info(f"Applied kinsoku processing to page {page_num}, column {col_num}")
             return True
             
@@ -1405,8 +1499,9 @@ class GenkouYoshiDocumentBuilder:
             tblPr.append(tblBorders)
             
             # Configure all cells with proper Genkou Yoshi formatting
-            for col in range(grid_cols):
-                for row in range(grid_rows):
+            # Note: For tategaki, we iterate row-first to match DOCX table structure
+            for row in range(grid_rows):
+                for col in range(grid_cols):
                     cell = table.cell(row, col)
                     
                     # Set cell properties
@@ -1436,7 +1531,7 @@ class GenkouYoshiDocumentBuilder:
                         tcMar.append(margin_elem)
                     tcPr.append(tcMar)
                     
-                    # Get character for this cell position
+                    # Get character for this cell position (corrected coordinate mapping)
                     char = page['columns'].get(col+1, {}).get(row+1, '')
                     
                     # Configure cell paragraph
@@ -1529,18 +1624,32 @@ class GenkouYoshiDocumentBuilder:
             text_dir = OxmlElement('w:textDirection')
             sectPr.append(text_dir)
         text_dir.set(qn('w:val'), 'tbRl')
+        
+        # Also set document-level bidi properties for proper tategaki
+        bidi = sectPr.find(qn('w:bidi'))
+        if bidi is None:
+            bidi = OxmlElement('w:bidi')
+            sectPr.append(bidi)
 
     def _set_vertical_text_direction(self, paragraph):
-        """Set vertical text direction for paragraph"""
+        """Set vertical text direction for paragraph with proper tategaki formatting"""
         pPr = paragraph._p.pPr
         if pPr is None:
             pPr = OxmlElement('w:pPr')
             paragraph._p.insert(0, pPr)
+        
+        # Set text direction to top-to-bottom, right-to-left
         text_dir = pPr.find(qn('w:textDirection'))
         if text_dir is None:
             text_dir = OxmlElement('w:textDirection')
             pPr.append(text_dir)
         text_dir.set(qn('w:val'), 'tbRl')
+        
+        # Set paragraph bidi for right-to-left flow
+        bidi = pPr.find(qn('w:bidi'))
+        if bidi is None:
+            bidi = OxmlElement('w:bidi')
+            pPr.append(bidi)
 
 
 def main():
