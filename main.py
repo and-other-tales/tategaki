@@ -2266,10 +2266,10 @@ class GenkouYoshiDocumentBuilder:
 
     def generate_docx_content(self, progress_callback=None):
         """
-        Generate DOCX content with proper Genkou Yoshi formatting
+        Generate DOCX content using Word's native vertical text support
+        Much more efficient than table-based approach - uses native Japanese typography
         """
-        from docx.shared import Pt, Mm
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
         
@@ -2277,162 +2277,45 @@ class GenkouYoshiDocumentBuilder:
         while len(self.doc.paragraphs) > 0:
             p = self.doc.paragraphs[0]
             p._element.getparent().remove(p._element)
-        
-        # Calculate dimensions with safety margins
-        margins = self.page_format['margins']
-        grid_cols = self.grid.max_columns_per_page
-        grid_rows = self.grid.squares_per_column
-        
-        # Calculate available space with safety margins to ensure grid fits within page
-        safety_margin = 3  # 3mm safety margin on each side
-        footer_space = 8   # 8mm reserved for page numbers
-        
-        avail_width = self.page_format['width'] - margins['inner'] - margins['outer'] - (2 * safety_margin)
-        avail_height = self.page_format['height'] - margins['top'] - margins['bottom'] - footer_space - (2 * safety_margin)
-        
-        # Calculate cell size ensuring the entire grid fits within available space
-        cell_width = avail_width / grid_cols
-        cell_height = avail_height / grid_rows
-        cell_size = min(cell_width, cell_height)
-        
-        # Ensure minimum readable cell size
-        cell_size = max(cell_size, 3.5)  # Minimum 3.5mm for readability
-        
-        # Calculate final table dimensions
-        table_width = cell_size * grid_cols
-        table_height = cell_size * grid_rows
-        
-        # Calculate optimal font size for Genkou Yoshi standards
-        font_size_pt = max(6, min(14, cell_size * 0.72 * 2.83465))  # mm to pt conversion
-        
-        # Convert measurements to Word's internal units (twips)
-        cell_width_twips = int(cell_size * 56.7)
-        table_width_twips = int(table_width * 56.7)
-        
-        # Process all pages
+            
+        # Validate grid data before generating DOCX
         pages = self.grid.get_all_pages()
-        for page_idx, page in enumerate(pages):
-            # Create table with exact dimensions
-            table = self.doc.add_table(rows=grid_rows, cols=grid_cols)
-            table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        if not self._validate_grid_data(pages):
+            raise ValueError("Grid data validation failed - cannot generate compliant DOCX")
             
-            # Set table-level properties for proper sizing and positioning
-            tbl = table._tbl
-            tblPr = tbl.tblPr
-            if tblPr is None:
-                tblPr = OxmlElement('w:tblPr')
-                tbl.insert(0, tblPr)
+        # Configure document for native vertical text layout
+        self._setup_document_vertical_text_direction()
+        
+        # Calculate optimal font size based on page format
+        character_size = self.page_format.get('character_size', 9)
+        font_size_points = max(8, min(14, character_size * 1.2))
+        
+        # Process each page using efficient native vertical text
+        for page_index, page_data in enumerate(pages):
+            if 'columns' not in page_data:
+                continue
+                
+            # Create content for this page
+            page_text_content = self._convert_grid_to_vertical_text(page_data)
             
-            # Set explicit table width to prevent overflow
-            tblW = OxmlElement('w:tblW')
-            tblW.set(qn('w:w'), str(table_width_twips))
-            tblW.set(qn('w:type'), 'dxa')
-            tblPr.append(tblW)
-            
-            # Center the table horizontally
-            tblJc = OxmlElement('w:jc')
-            tblJc.set(qn('w:val'), 'center')
-            tblPr.append(tblJc)
-            
-            # Set table layout to fixed for consistent cell sizing
-            tblLayout = OxmlElement('w:tblLayout')
-            tblLayout.set(qn('w:type'), 'fixed')
-            tblPr.append(tblLayout)
-            
-            # Configure table borders for Genkou Yoshi grid appearance
-            tblBorders = OxmlElement('w:tblBorders')
-            for border_name in ['top', 'left', 'bottom', 'right', 'insideH', 'insideV']:
-                border = OxmlElement(f'w:{border_name}')
-                border.set(qn('w:val'), 'single')
-                border.set(qn('w:sz'), '4')  # Thin border
-                border.set(qn('w:space'), '0')
-                border.set(qn('w:color'), 'CCCCCC')  # Light gray
-                tblBorders.append(border)
-            tblPr.append(tblBorders)
-            
-            # Configure all cells with proper Genkou Yoshi formatting
-            # Note: For tategaki, we iterate row-first to match DOCX table structure
-            for row in range(grid_rows):
-                for col in range(grid_cols):
-                    cell = table.cell(row, col)
-                    
-                    # Set cell properties
-                    tc = cell._tc
-                    tcPr = tc.tcPr
-                    if tcPr is None:
-                        tcPr = OxmlElement('w:tcPr')
-                        tc.insert(0, tcPr)
-                    
-                    # Set exact cell width
-                    tcW = OxmlElement('w:tcW')
-                    tcW.set(qn('w:w'), str(cell_width_twips))
-                    tcW.set(qn('w:type'), 'dxa')
-                    tcPr.append(tcW)
-                    
-                    # Set cell vertical alignment to center
-                    vAlign = OxmlElement('w:vAlign')
-                    vAlign.set(qn('w:val'), 'center')
-                    tcPr.append(vAlign)
-                    
-                    # Remove cell margins for tight grid appearance
-                    tcMar = OxmlElement('w:tcMar')
-                    for margin_name in ['top', 'left', 'bottom', 'right']:
-                        margin_elem = OxmlElement(f'w:{margin_name}')
-                        margin_elem.set(qn('w:w'), '0')
-                        margin_elem.set(qn('w:type'), 'dxa')
-                        tcMar.append(margin_elem)
-                    tcPr.append(tcMar)
-                    
-                    # Get character for this cell position (corrected coordinate mapping)
-                    char = page['columns'].get(col+1, {}).get(row+1, '')
-                    
-                    # Configure cell paragraph
-                    p = cell.paragraphs[0]
-                    p.clear()
-                    
-                    # Add character if present
-                    if char:
-                        run = p.add_run(char)
-                        run.font.name = self.font_name
-                        run.font.size = Pt(font_size_pt)
-                        run.font.color.rgb = RGBColor(0, 0, 0)  # Ensure black text
-                    
-                    # Set paragraph properties for proper Genkou Yoshi formatting
-                    pPr = p._p.pPr
-                    if pPr is None:
-                        pPr = OxmlElement('w:pPr')
-                        p._p.insert(0, pPr)
-                    
-                    # Center text horizontally within cell
-                    jc = OxmlElement('w:jc')
-                    jc.set(qn('w:val'), 'center')
-                    pPr.append(jc)
-                    
-                    # Set vertical text direction for Tategaki
-                    self._set_vertical_text_direction(p)
-                    
-                    # Remove paragraph spacing for tight grid
-                    spacing = OxmlElement('w:spacing')
-                    spacing.set(qn('w:before'), '0')
-                    spacing.set(qn('w:after'), '0')
-                    spacing.set(qn('w:line'), '240')  # Single line spacing
-                    spacing.set(qn('w:lineRule'), 'auto')
-                    pPr.append(spacing)
-                    
-                    # Set paragraph alignment
-                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            
-            # Add page numbering (only setup once on first page)
-            if page_idx == 0:
-                self._setup_page_numbers()
-            
-            # Add page break between pages (except for last page)
-            if page_idx < len(pages) - 1:
+            if page_text_content.strip():
+                # Create paragraph with native vertical text formatting
+                paragraph = self.doc.add_paragraph()
+                self._configure_paragraph_for_vertical_text(paragraph, font_size_points)
+                
+                # Add the text content with proper formatting
+                text_run = paragraph.add_run(page_text_content)
+                text_run.font.name = self.font_name
+                text_run.font.size = Pt(font_size_points)
+                
+            # Add page break between pages (except for the last page)
+            if page_index < len(pages) - 1:
                 self.doc.add_page_break()
                 
-            # Update progress
+            # Update progress callback if provided
             if progress_callback:
-                progress_callback(page_idx + 1, len(pages))
+                progress_callback(page_index + 1, len(pages))
+        
 
     def _setup_page_numbers(self):
         """Setup page numbers in footer within margins"""
@@ -2502,6 +2385,46 @@ class GenkouYoshiDocumentBuilder:
         if bidi is None:
             bidi = OxmlElement('w:bidi')
             pPr.append(bidi)
+            
+    def _validate_grid_data(self, pages):
+        """Validate grid data conforms to specifications"""
+        if not pages:
+            return False
+            
+        grid_cols = self.grid.max_columns_per_page
+        grid_rows = self.grid.squares_per_column
+        
+        for page_idx, page in enumerate(pages):
+            if not self._validate_page_structure(page, grid_cols, grid_rows):
+                print(f"Validation failed for page {page_idx + 1}")
+                return False
+        return True
+        
+    def _validate_page_structure(self, page, expected_cols, expected_rows):
+        """Validate individual page structure"""
+        if 'columns' not in page:
+            return False
+            
+        columns = page['columns']
+        
+        # Check column count doesn't exceed grid
+        if len(columns) > expected_cols:
+            print(f"Column overflow: {len(columns)} > {expected_cols}")
+            return False
+            
+        # Check each column's row count
+        for col_num, squares in columns.items():
+            if max(squares.keys()) > expected_rows:
+                print(f"Row overflow in column {col_num}: {max(squares.keys())} > {expected_rows}")
+                return False
+                
+            # Validate each character is single character
+            for square_num, char in squares.items():
+                if not isinstance(char, str) or len(char) != 1:
+                    print(f"Invalid character at col {col_num}, row {square_num}: '{char}'")
+                    return False
+                    
+        return True
 
 
 def main():

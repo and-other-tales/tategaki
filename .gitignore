@@ -4,6 +4,8 @@ __pycache__/
 *$py.class
 .env
 lang/.env
+.claude
+.venv
 # C extensions
 *.so
 master.txt
