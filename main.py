@@ -2677,7 +2677,7 @@ if __name__ == "__main__":
                         column_characters.append('\u3000')
                         
                 # Only add non-empty columns to the text
-                if any(char \!= '\u3000' for char in column_characters):
+                if any(char != '\u3000' for char in column_characters):
                     # Remove trailing spaces and add column text
                     column_text = ''.join(column_characters).rstrip('\u3000')
                     if column_text:
