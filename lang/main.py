@@ -602,6 +602,9 @@ GenkouYoshiGrid = parent_main.GenkouYoshiGrid
 JapaneseTextProcessor = parent_main.JapaneseTextProcessor
 GenkouYoshiDocumentBuilder = parent_main.GenkouYoshiDocumentBuilder
 
+# Reload the parent module to get the latest fixes
+importlib.reload(parent_main)
+
 
 class EnhancedGenkouYoshiDocumentBuilder(GenkouYoshiDocumentBuilder):
     """Enhanced document builder with AI processing capabilities"""

@@ -889,6 +889,11 @@ class VerificationEngine:
             
             # Analyze the document (read fresh copy after any previous regeneration)
             with self.console.status("Analyzing DOCX structure..."):
+                # Ensure we have a fresh document object for the builder
+                if self.builder.doc is None:
+                    from docx import Document
+                    self.builder.doc = Document()
+                    
                 analyzer = DocxAnalyzer(docx_path)
                 analysis = analyzer.run_complete_analysis()
             
@@ -957,6 +962,19 @@ class VerificationEngine:
                         self.builder.generate_docx_content(progress_callback=progress_callback)
                         progress.update(task, completed=100)
                         self.builder.doc.save(docx_path)
+                        
+                        # Force file system sync to ensure the file is fully written
+                        # before the next iteration attempts to read it
+                        import os
+                        if hasattr(os, 'sync'):
+                            os.sync()
+                        
+                        # Close the document to release file handles
+                        self.builder.doc = None
+                        
+                        # Small delay to ensure file system operations complete
+                        import time
+                        time.sleep(0.1)
                 else:
                     self.console.print("[yellow]No fixes applied, stopping verification[/yellow]")
                     break
