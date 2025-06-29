@@ -530,7 +530,13 @@ class DocumentAdjuster:
                             page_data['columns'][current_col][1] = prohibited_char
             
             # Update the builder's grid with the fixed data
+            # Ensure we update the correct pages list that get_all_pages() actually uses
             if page_num - 1 < len(self.builder.grid.pages):
+                self.builder.grid.pages[page_num - 1] = page_data
+            else:
+                # Extend pages list if needed
+                while len(self.builder.grid.pages) <= page_num - 1:
+                    self.builder.grid.pages.append({'page_num': len(self.builder.grid.pages) + 1, 'columns': {}})
                 self.builder.grid.pages[page_num - 1] = page_data
             
             # If this is the current page, also update the current page grid
@@ -612,12 +618,14 @@ class DocumentAdjuster:
             return False
     
     def apply_fixes(self, violations: List[Dict]) -> Dict:
-        """Apply fixes for all types of violations"""
+        """Apply fixes for all types of violations with comprehensive re-validation"""
         fixes_report = {
             'line_breaking': 0,
             'punctuation': 0,
             'grid_overflow': 0,
-            'total_fixes': 0
+            'total_fixes': 0,
+            'validation_passes': 0,
+            'secondary_violations_fixed': 0
         }
         
         # Categorize violations
@@ -625,18 +633,234 @@ class DocumentAdjuster:
         punctuation_violations = [v for v in violations if v['type'] == 'punctuation_alignment']
         overflow_violations = [v for v in violations if v['type'] in ['grid_overflow', 'column_overflow']]
         
-        # Apply fixes
-        fixes_report['line_breaking'] = self.fix_line_breaking_violations(line_breaking_violations)
-        fixes_report['punctuation'] = self.fix_punctuation_alignment(punctuation_violations)
-        fixes_report['grid_overflow'] = self.fix_grid_overflow(overflow_violations)
+        # Apply fixes in order of priority (line breaking first as it affects grid structure)
+        if line_breaking_violations:
+            fixes_report['line_breaking'] = self.fix_line_breaking_violations(line_breaking_violations)
+            # Re-validate after line breaking fixes to catch any new violations
+            if fixes_report['line_breaking'] > 0:
+                secondary_fixes = self._validate_and_fix_secondary_violations()
+                fixes_report['secondary_violations_fixed'] += secondary_fixes
+                fixes_report['validation_passes'] += 1
+        
+        if overflow_violations:
+            fixes_report['grid_overflow'] = self.fix_grid_overflow(overflow_violations)
+            # Re-validate after overflow fixes
+            if fixes_report['grid_overflow'] > 0:
+                secondary_fixes = self._validate_and_fix_secondary_violations()
+                fixes_report['secondary_violations_fixed'] += secondary_fixes
+                fixes_report['validation_passes'] += 1
+        
+        if punctuation_violations:
+            fixes_report['punctuation'] = self.fix_punctuation_alignment(punctuation_violations)
+            # Re-validate after punctuation fixes
+            if fixes_report['punctuation'] > 0:
+                secondary_fixes = self._validate_and_fix_secondary_violations()
+                fixes_report['secondary_violations_fixed'] += secondary_fixes
+                fixes_report['validation_passes'] += 1
         
         fixes_report['total_fixes'] = sum([
             fixes_report['line_breaking'],
             fixes_report['punctuation'],
-            fixes_report['grid_overflow']
+            fixes_report['grid_overflow'],
+            fixes_report['secondary_violations_fixed']
         ])
         
         return fixes_report
+    
+    def _validate_and_fix_secondary_violations(self) -> int:
+        """Run comprehensive validation and fix any secondary violations introduced by previous fixes"""
+        try:
+            # Create a temporary validator to check current grid state
+            validator = GenkouYoshiValidator(self.page_format)
+            
+            # Get current grid data from the builder
+            current_grid_data = {}
+            pages = self.builder.grid.get_all_pages()
+            
+            for page in pages:
+                page_num = page['page_num']
+                current_grid_data[page_num] = page
+            
+            # Run all validation checks on current state
+            all_violations = []
+            all_violations.extend(validator.validate_grid_structure(current_grid_data))
+            all_violations.extend(validator.validate_character_placement(current_grid_data))
+            all_violations.extend(validator.validate_line_breaking_rules(current_grid_data))
+            all_violations.extend(validator.validate_quotation_placement(current_grid_data))
+            all_violations.extend(validator.validate_punctuation_placement(current_grid_data))
+            
+            # Filter out violations we can automatically fix
+            fixable_violations = [v for v in all_violations if v['type'] in [
+                'gyoutou_kinsoku', 'gyoumatsu_kinsoku', 'opening_quote_at_bottom', 'closing_quote_at_top'
+            ]]
+            
+            secondary_fixes_applied = 0
+            
+            # Fix quotation placement violations
+            quote_violations = [v for v in fixable_violations if v['type'] in ['opening_quote_at_bottom', 'closing_quote_at_top']]
+            if quote_violations:
+                secondary_fixes_applied += self._fix_quotation_violations(quote_violations)
+            
+            # Fix any remaining line breaking violations (recursive kinsoku processing)
+            remaining_kinsoku = [v for v in fixable_violations if v['type'] in ['gyoutou_kinsoku', 'gyoumatsu_kinsoku']]
+            if remaining_kinsoku:
+                secondary_fixes_applied += self.fix_line_breaking_violations(remaining_kinsoku)
+            
+            # Validate character-per-cell compliance after fixes
+            char_violations = [v for v in all_violations if v['type'] == 'multi_character_cell']
+            if char_violations:
+                secondary_fixes_applied += self._fix_character_placement_violations(char_violations)
+            
+            return secondary_fixes_applied
+            
+        except Exception as e:
+            logging.warning(f"Secondary validation failed: {e}")
+            return 0
+    
+    def _fix_quotation_violations(self, violations: List[Dict]) -> int:
+        """Fix quotation mark placement violations"""
+        fixes_applied = 0
+        
+        for violation in violations:
+            try:
+                page_num = violation['page']
+                col_num = violation['column']
+                violation_type = violation['type']
+                
+                # Get current page data
+                pages = self.builder.grid.get_all_pages()
+                if page_num - 1 >= len(pages):
+                    continue
+                
+                page_data = pages[page_num - 1]
+                col_data = page_data['columns'].get(col_num, {})
+                
+                if violation_type == 'opening_quote_at_bottom':
+                    # Move opening quote from bottom to next column top
+                    if col_data:
+                        sorted_rows = sorted(col_data.keys())
+                        last_row = sorted_rows[-1]
+                        quote_char = col_data[last_row]
+                        
+                        # Remove from current position
+                        del col_data[last_row]
+                        
+                        # Try to add to next column
+                        next_col = col_num + 1
+                        if next_col <= self.builder.grid.max_columns_per_page:
+                            if next_col not in page_data['columns']:
+                                page_data['columns'][next_col] = {}
+                            # Insert at top of next column
+                            next_col_data = page_data['columns'][next_col]
+                            # Shift existing content down
+                            new_next_col_data = {1: quote_char}
+                            for row, char in next_col_data.items():
+                                new_next_col_data[row + 1] = char
+                            page_data['columns'][next_col] = new_next_col_data
+                            fixes_applied += 1
+                
+                elif violation_type == 'closing_quote_at_top':
+                    # Move closing quote from top to previous column bottom
+                    if col_data:
+                        sorted_rows = sorted(col_data.keys())
+                        first_row = sorted_rows[0]
+                        quote_char = col_data[first_row]
+                        
+                        # Remove from current position
+                        del col_data[first_row]
+                        # Shift remaining content up
+                        new_col_data = {}
+                        for i, row in enumerate(sorted_rows[1:], 1):
+                            new_col_data[i] = col_data[row]
+                        page_data['columns'][col_num] = new_col_data
+                        
+                        # Try to add to previous column
+                        prev_col = col_num - 1
+                        if prev_col >= 1:
+                            if prev_col not in page_data['columns']:
+                                page_data['columns'][prev_col] = {}
+                            prev_col_data = page_data['columns'][prev_col]
+                            # Add to bottom of previous column
+                            if prev_col_data:
+                                max_row = max(prev_col_data.keys())
+                                if max_row < self.builder.grid.squares_per_column:
+                                    prev_col_data[max_row + 1] = quote_char
+                                    fixes_applied += 1
+                            else:
+                                prev_col_data[1] = quote_char
+                                fixes_applied += 1
+                
+                # Update the grid with fixed data
+                if page_num - 1 < len(self.builder.grid.pages):
+                    self.builder.grid.pages[page_num - 1] = page_data
+                    
+            except Exception as e:
+                logging.warning(f"Failed to fix quotation violation: {e}")
+                continue
+        
+        return fixes_applied
+    
+    def _fix_character_placement_violations(self, violations: List[Dict]) -> int:
+        """Fix multi-character cell violations by splitting content"""
+        fixes_applied = 0
+        
+        for violation in violations:
+            try:
+                page_num = violation['page']
+                col_num = violation['column']
+                row_num = violation['row']
+                content = violation['content']
+                
+                # Get current page data
+                pages = self.builder.grid.get_all_pages()
+                if page_num - 1 >= len(pages):
+                    continue
+                
+                page_data = pages[page_num - 1]
+                col_data = page_data['columns'].get(col_num, {})
+                
+                if row_num in col_data and len(content) > 1:
+                    # Split multi-character content across multiple cells
+                    chars = list(content)
+                    
+                    # Place first character in original position
+                    col_data[row_num] = chars[0]
+                    
+                    # Place remaining characters in subsequent rows/columns
+                    current_row = row_num + 1
+                    current_col = col_num
+                    
+                    for char in chars[1:]:
+                        if current_row > self.builder.grid.squares_per_column:
+                            # Move to next column
+                            current_col += 1
+                            current_row = 1
+                            
+                            if current_col > self.builder.grid.max_columns_per_page:
+                                # Would overflow page - stop placing characters
+                                break
+                            
+                            if current_col not in page_data['columns']:
+                                page_data['columns'][current_col] = {}
+                        
+                        # Ensure we have the column data
+                        if current_col not in page_data['columns']:
+                            page_data['columns'][current_col] = {}
+                        
+                        page_data['columns'][current_col][current_row] = char
+                        current_row += 1
+                    
+                    fixes_applied += 1
+                
+                # Update the grid with fixed data
+                if page_num - 1 < len(self.builder.grid.pages):
+                    self.builder.grid.pages[page_num - 1] = page_data
+                    
+            except Exception as e:
+                logging.warning(f"Failed to fix character placement violation: {e}")
+                continue
+        
+        return fixes_applied
 
 
 class VerificationEngine:
@@ -663,7 +887,7 @@ class VerificationEngine:
             iteration += 1
             self.console.print(f"\n[yellow]Verification Iteration {iteration}[/yellow]")
             
-            # Analyze the document
+            # Analyze the document (read fresh copy after any previous regeneration)
             with self.console.status("Analyzing DOCX structure..."):
                 analyzer = DocxAnalyzer(docx_path)
                 analysis = analyzer.run_complete_analysis()
@@ -809,6 +1033,12 @@ class VerificationEngine:
         fixes_table.add_row("Line Breaking", str(fixes_report['line_breaking']))
         fixes_table.add_row("Punctuation", str(fixes_report['punctuation']))
         fixes_table.add_row("Grid Overflow", str(fixes_report['grid_overflow']))
+        
+        # Show secondary violations if any were fixed
+        if fixes_report.get('secondary_violations_fixed', 0) > 0:
+            fixes_table.add_row("Secondary Violations", str(fixes_report['secondary_violations_fixed']))
+            fixes_table.add_row("Validation Passes", str(fixes_report.get('validation_passes', 0)))
+        
         fixes_table.add_row("Total", f"[bold]{fixes_report['total_fixes']}[/bold]")
         
         self.console.print(fixes_table)
