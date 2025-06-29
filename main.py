@@ -2592,3 +2592,97 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+    def _setup_document_vertical_text_direction(self):
+        """Configure document for native Japanese vertical text layout"""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        
+        section = self.doc.sections[0]
+        section_properties = section._sectPr
+        
+        # Set document text direction to vertical (top-to-bottom, right-to-left)
+        text_direction_element = section_properties.find(qn('w:textDirection'))
+        if text_direction_element is None:
+            text_direction_element = OxmlElement('w:textDirection')
+            section_properties.append(text_direction_element)
+        text_direction_element.set(qn('w:val'), 'tbRl')
+        
+        # Set document bidirectional text for right-to-left reading order
+        bidi_element = section_properties.find(qn('w:bidi'))
+        if bidi_element is None:
+            bidi_element = OxmlElement('w:bidi')
+            section_properties.append(bidi_element)
+            
+    def _configure_paragraph_for_vertical_text(self, paragraph, font_size_points):
+        """Configure paragraph with optimal settings for vertical Japanese text"""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        
+        paragraph_properties = paragraph._p.pPr
+        if paragraph_properties is None:
+            paragraph_properties = OxmlElement('w:pPr')
+            paragraph._p.insert(0, paragraph_properties)
+            
+        # Set paragraph text direction to vertical
+        text_direction_element = paragraph_properties.find(qn('w:textDirection'))
+        if text_direction_element is None:
+            text_direction_element = OxmlElement('w:textDirection')
+            paragraph_properties.append(text_direction_element)
+        text_direction_element.set(qn('w:val'), 'tbRl')
+        
+        # Configure line spacing for proper grid alignment
+        spacing_element = OxmlElement('w:spacing')
+        line_spacing_twips = int(font_size_points * 20 * 1.2)  # 120% of font size in twips
+        spacing_element.set(qn('w:line'), str(line_spacing_twips))
+        spacing_element.set(qn('w:lineRule'), 'exact')
+        paragraph_properties.append(spacing_element)
+        
+        # Configure character spacing for uniform grid appearance
+        run_properties = paragraph_properties.find(qn('w:rPr'))
+        if run_properties is None:
+            run_properties = OxmlElement('w:rPr')
+            paragraph_properties.append(run_properties)
+            
+        char_spacing_element = OxmlElement('w:spacing')
+        character_spacing_twips = int(font_size_points * 20 * 0.1)  # Slight character spacing
+        char_spacing_element.set(qn('w:val'), str(character_spacing_twips))
+        run_properties.append(char_spacing_element)
+        
+    def _convert_grid_to_vertical_text(self, page_data):
+        """Convert grid structure to native vertical text with proper column flow"""
+        if 'columns' not in page_data:
+            return ""
+            
+        columns_data = page_data['columns']
+        total_columns = self.grid.max_columns_per_page
+        total_rows = self.grid.squares_per_column
+        
+        # Build text content column by column (right to left for tategaki)
+        column_text_segments = []
+        
+        for column_number in range(total_columns, 0, -1):  # Right to left iteration
+            if column_number in columns_data:
+                column_characters = []
+                
+                # Process each row in the column (top to bottom)
+                for row_number in range(1, total_rows + 1):
+                    character = columns_data[column_number].get(row_number, '')
+                    
+                    # Validate single character per cell and add to column
+                    if character and len(character) == 1:
+                        column_characters.append(character)
+                    elif not character:
+                        # Use full-width space for empty cells to maintain grid structure
+                        column_characters.append('\u3000')
+                        
+                # Only add non-empty columns to the text
+                if any(char \!= '\u3000' for char in column_characters):
+                    # Remove trailing spaces and add column text
+                    column_text = ''.join(column_characters).rstrip('\u3000')
+                    if column_text:
+                        column_text_segments.append(column_text)
+                        
+        # Join columns with line breaks for proper vertical text flow
+        return '\n'.join(column_text_segments)
+
