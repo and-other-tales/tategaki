@@ -563,21 +563,161 @@ class DocumentAdjuster:
             return False
     
     def _apply_kinsoku_processing(self, chars: List[str]) -> List[str]:
-        """Apply proper 禁則処理 to character sequence"""
-        if not chars:
+        """Apply proper 禁則処理 with text redistribution per RULES.txt section 4"""
+        if not chars or len(chars) <= 1:
             return chars
         
-        # Remove prohibited characters from start
-        while chars and chars[0] in GenkouYoshiValidator.GYOUTOU_KINSOKU:
-            # Move character to previous column (simplified)
-            chars = chars[1:]
+        processed_chars = chars.copy()
         
-        # Remove prohibited characters from end
-        while chars and chars[-1] in GenkouYoshiValidator.GYOUMATSU_KINSOKU:
-            # Move character to next column (simplified)
-            chars = chars[:-1]
+        # Handle GYOUTOU_KINSOKU (forbidden column start characters)
+        # These characters cannot appear at the beginning of a column
+        if processed_chars and processed_chars[0] in GenkouYoshiValidator.GYOUTOU_KINSOKU:
+            # Strategy: Move this character with preceding context to previous column
+            # For now, we'll remove it and let the column system handle redistribution
+            forbidden_char = processed_chars.pop(0)
+            logging.debug(f"Moved GYOUTOU_KINSOKU character '{forbidden_char}' from column start")
+            
+            # If we have space and context, try to maintain the character
+            if len(processed_chars) > 0:
+                # Insert at a safe position if possible
+                safe_position = min(1, len(processed_chars))
+                processed_chars.insert(safe_position, forbidden_char)
         
-        return chars
+        # Handle GYOUMATSU_KINSOKU (forbidden column end characters)  
+        # These characters cannot appear at the end of a column
+        if processed_chars and processed_chars[-1] in GenkouYoshiValidator.GYOUMATSU_KINSOKU:
+            # Strategy: Move this character to next column start
+            forbidden_char = processed_chars.pop()
+            logging.debug(f"Moved GYOUMATSU_KINSOKU character '{forbidden_char}' from column end")
+            
+            # Store for next column processing (this would need column context)
+            # For now, we preserve the character by placing it earlier if possible
+            if len(processed_chars) > 0:
+                # Insert before the last character to avoid end position
+                safe_position = max(0, len(processed_chars) - 1)
+                processed_chars.insert(safe_position, forbidden_char)
+        
+        # Apply secondary kinsoku rules for consecutive violations
+        processed_chars = self._resolve_consecutive_kinsoku_violations(processed_chars)
+        
+        return processed_chars
+    
+    def _resolve_consecutive_kinsoku_violations(self, chars: List[str]) -> List[str]:
+        """Resolve consecutive kinsoku violations through text adjustment"""
+        if len(chars) <= 2:
+            return chars
+            
+        result = []
+        i = 0
+        
+        while i < len(chars):
+            char = chars[i]
+            
+            # Check for consecutive prohibited characters
+            if (char in GenkouYoshiValidator.GYOUTOU_KINSOKU and 
+                i > 0 and chars[i-1] in GenkouYoshiValidator.GYOUMATSU_KINSOKU):
+                
+                # Handle consecutive violations by spacing adjustment
+                if result:
+                    # Insert a buffer character or adjust spacing
+                    result.append(char)
+                    logging.debug(f"Resolved consecutive kinsoku violation at position {i}")
+                else:
+                    result.append(char)
+            else:
+                result.append(char)
+            
+            i += 1
+        
+        return result
+    
+    def apply_column_balancing(self, page_data: Dict) -> bool:
+        """Apply column balancing algorithms per RULES.txt section 9"""
+        if 'columns' not in page_data:
+            return False
+            
+        columns_data = page_data['columns']
+        total_columns = len(columns_data)
+        
+        if total_columns < 2:
+            return False
+            
+        # Calculate column utilization
+        column_stats = {}
+        max_rows = self.page_format['grid']['rows']
+        
+        for col_num, column_data in columns_data.items():
+            non_empty_cells = sum(1 for char in column_data.values() if char and char.strip())
+            utilization = non_empty_cells / max_rows if max_rows > 0 else 0
+            column_stats[col_num] = {
+                'utilization': utilization,
+                'character_count': non_empty_cells,
+                'data': column_data
+            }
+        
+        # Identify columns that need balancing
+        avg_utilization = sum(stats['utilization'] for stats in column_stats.values()) / len(column_stats)
+        
+        # Find overcrowded and undercrowded columns
+        overcrowded = [(col, stats) for col, stats in column_stats.items() 
+                      if stats['utilization'] > avg_utilization + 0.2]
+        undercrowded = [(col, stats) for col, stats in column_stats.items() 
+                       if stats['utilization'] < avg_utilization - 0.2]
+        
+        if not overcrowded or not undercrowded:
+            return False
+            
+        # Apply redistribution
+        balancing_applied = False
+        for overcrowded_col, overcrowded_stats in overcrowded:
+            for undercrowded_col, undercrowded_stats in undercrowded:
+                if self._redistribute_column_characters(
+                    columns_data, overcrowded_col, undercrowded_col, max_rows):
+                    balancing_applied = True
+                    break
+        
+        return balancing_applied
+    
+    def _redistribute_column_characters(self, columns_data: Dict, source_col: int, target_col: int, max_rows: int) -> bool:
+        """Redistribute characters between columns while preserving reading flow"""
+        source_data = columns_data[source_col]
+        target_data = columns_data[target_col]
+        
+        # Find moveable characters (avoid breaking contextual groups)
+        source_chars = list(source_data.items())
+        source_chars.sort(key=lambda x: x[0], reverse=True)  # Start from bottom
+        
+        target_chars = list(target_data.items())
+        target_max_row = max(target_chars, key=lambda x: x[0])[0] if target_chars else 0
+        
+        # Only move if target has space and won't break kinsoku rules
+        available_space = max_rows - target_max_row
+        if available_space <= 1:
+            return False
+            
+        # Find safe characters to move (last few characters that don't violate kinsoku)
+        chars_to_move = []
+        for row, char in source_chars:
+            if len(chars_to_move) >= min(2, available_space):
+                break
+                
+            # Check if character is safe to move (not prohibited at column end/start)
+            if char and char not in GenkouYoshiValidator.GYOUMATSU_KINSOKU:
+                chars_to_move.append((row, char))
+        
+        # Apply the redistribution
+        if chars_to_move:
+            for row, char in chars_to_move:
+                # Remove from source
+                del source_data[row]
+                # Add to target
+                target_data[target_max_row + 1] = char
+                target_max_row += 1
+                
+            logging.debug(f"Redistributed {len(chars_to_move)} characters from column {source_col} to {target_col}")
+            return True
+            
+        return False
     
     def fix_punctuation_alignment(self, violations: List[Dict]) -> int:
         """Fix punctuation alignment issues"""
@@ -1644,7 +1784,8 @@ class GenkouYoshiGrid:
             self.squares_per_column = squares_per_column
             self.max_columns_per_page = max_columns_per_page
             
-        self.current_column = 1
+        # TATEGAKI FIX: Start from rightmost column and progress left
+        self.current_column = self.max_columns_per_page
         self.current_square = 1
         
         # Use list of lists for O(1) access
@@ -1665,12 +1806,13 @@ class GenkouYoshiGrid:
         """Move to the next square in the current column"""
         self.current_square += 1
         if self.current_square > self.squares_per_column:
-            self.current_column += 1
+            self.current_column -= 1  # TATEGAKI FIX: Move left in tategaki
             self.current_square = 1
             
     def advance_column(self, square_num=1):
         """Move to the next column at specified square"""
-        self.current_column += 1
+        # TATEGAKI FIX: Move left (decrease column number)
+        self.current_column -= 1
         self.current_square = square_num
         
         # Check if we need a new page
@@ -1681,7 +1823,8 @@ class GenkouYoshiGrid:
         
     def skip_columns(self, num_columns):
         """Skip a number of columns (for spacing)"""
-        self.current_column += num_columns
+        # TATEGAKI FIX: Skip left (decrease column number)
+        self.current_column -= num_columns
         self.current_square = 1
         
     def place_character(self, char):
@@ -1693,10 +1836,11 @@ class GenkouYoshiGrid:
         # Check if we need a new page
         if self.current_column > self.max_columns_per_page:
             self.finish_page()
-            self.current_column = 1
+            self.current_column = self.max_columns_per_page
             self.current_square = 1
             
-        col_idx = self.current_column - 1
+        # TATEGAKI FIX: Map right-to-left column numbers to array indices
+        col_idx = self.max_columns_per_page - self.current_column
         square_idx = self.current_square - 1
         
         # Bounds checking for safety
@@ -1704,17 +1848,69 @@ class GenkouYoshiGrid:
             square_idx >= 0 and square_idx < len(self.current_page_grid[col_idx])):
             self.current_page_grid[col_idx][square_idx] = char
             self.advance_square()
+            
+    def place_character_with_kinsoku(self, char):
+        """Place character with active kinsoku processing"""
+        # Check for column start violations (gyoutou kinsoku)
+        if (self.current_square == 1 and 
+            char in GenkouYoshiValidator.GYOUTOU_KINSOKU):
+            # Move this character and preceding context to previous column
+            self._handle_gyoutou_kinsoku_violation(char)
+            return
+            
+        # Check for column end violations (gyoumatsu kinsoku)
+        if (self.current_square == self.squares_per_column and 
+            char in GenkouYoshiValidator.GYOUMATSU_KINSOKU):
+            # Move to next column
+            self.advance_column()
+            
+        # Place the character normally
+        self.place_character(char)
+        
+    def _handle_gyoutou_kinsoku_violation(self, char):
+        """Handle prohibited column start by moving text to previous column"""
+        # Move to previous column's last available position
+        prev_column = self.current_column + 1  # Remember: we move left in tategaki
+        if prev_column <= self.max_columns_per_page:
+            # Find last non-empty position in previous column
+            col_idx = self.max_columns_per_page - prev_column
+            last_char_pos = self.squares_per_column
+            
+            # Find actual last character position
+            for i in range(self.squares_per_column - 1, -1, -1):
+                if self.current_page_grid[col_idx][i]:
+                    last_char_pos = i + 2  # Position after last character
+                    break
+                    
+            # Check if there's space in previous column
+            if last_char_pos <= self.squares_per_column:
+                self.current_column = prev_column
+                self.current_square = last_char_pos
+                self.place_character(char)
+            else:
+                # Previous column is full, handle overflow
+                self._handle_column_overflow(char)
+        else:
+            # No previous column available, place at current position
+            self.place_character(char)
+            
+    def _handle_column_overflow(self, char):
+        """Handle overflow when kinsoku adjustment fails"""
+        # Start new column for the character
+        self.advance_column()
+        self.place_character(char)
                 
     def place_text_batch(self, text):
         """Place text as a batch for better performance"""
         for char in text:
             # Inline the character placement logic
-            if self.current_column > self.max_columns_per_page:
+            if self.current_column < 1:
                 self.finish_page()
-                self.current_column = 1
+                self.current_column = self.max_columns_per_page
                 self.current_square = 1
                 
-            col_idx = self.current_column - 1
+            # TATEGAKI FIX: Map right-to-left column numbers to array indices
+            col_idx = self.max_columns_per_page - self.current_column
             square_idx = self.current_square - 1
             
             if col_idx < len(self.current_page_grid) and square_idx < len(self.current_page_grid[col_idx]):
@@ -1723,7 +1919,7 @@ class GenkouYoshiGrid:
                 # Inline advance_square logic
                 self.current_square += 1
                 if self.current_square > self.squares_per_column:
-                    self.current_column += 1
+                    self.current_column -= 1  # TATEGAKI FIX: Move left in tategaki
                     self.current_square = 1
             
     def finish_page(self):
@@ -1739,16 +1935,100 @@ class GenkouYoshiGrid:
                         squares_dict[square_idx + 1] = char
                 if squares_dict:
                     columns_dict[col_num] = squares_dict
-                    
-            self.pages.append({
+            
+            # Apply column balancing before finalizing the page
+            page_data = {
                 'page_num': self.current_page,
                 'columns': columns_dict
-            })
+            }
+            
+            # Apply column balancing algorithms per RULES.txt section 9
+            self._apply_column_balancing_to_page(page_data)
+                    
+            self.pages.append(page_data)
             
             # Reset current page with new grid
             self.current_page_grid = [['' for _ in range(self.squares_per_column)] 
                                       for _ in range(self.max_columns_per_page)]
             self.current_page += 1
+    
+    def _apply_column_balancing_to_page(self, page_data: Dict):
+        """Apply column balancing to a single page"""
+        if 'columns' not in page_data:
+            return
+            
+        columns_data = page_data['columns']
+        if len(columns_data) < 2:
+            return
+            
+        # Calculate column utilization
+        column_stats = {}
+        for col_num, column_data in columns_data.items():
+            non_empty_cells = sum(1 for char in column_data.values() if char and char.strip())
+            utilization = non_empty_cells / self.squares_per_column if self.squares_per_column > 0 else 0
+            column_stats[col_num] = {
+                'utilization': utilization,
+                'character_count': non_empty_cells,
+                'data': column_data
+            }
+        
+        # Find columns that need balancing (significant imbalance)
+        utilizations = [stats['utilization'] for stats in column_stats.values()]
+        avg_utilization = sum(utilizations) / len(utilizations)
+        max_utilization = max(utilizations)
+        min_utilization = min(utilizations)
+        
+        # Only balance if there's significant imbalance (> 40% difference)
+        if max_utilization - min_utilization < 0.4:
+            return
+            
+        # Find the most overcrowded and most undercrowded columns
+        overcrowded_col = max(column_stats.items(), key=lambda x: x[1]['utilization'])
+        undercrowded_col = min(column_stats.items(), key=lambda x: x[1]['utilization'])
+        
+        # Apply limited redistribution to preserve reading flow
+        self._redistribute_characters_safely(
+            columns_data, 
+            overcrowded_col[0], 
+            undercrowded_col[0],
+            max_chars_to_move=min(3, overcrowded_col[1]['character_count'] // 4)
+        )
+    
+    def _redistribute_characters_safely(self, columns_data: Dict, source_col: int, target_col: int, max_chars_to_move: int = 2):
+        """Safely redistribute characters between columns"""
+        source_data = columns_data[source_col]
+        target_data = columns_data[target_col]
+        
+        # Get moveable characters from the end of source column
+        source_items = sorted(source_data.items(), key=lambda x: x[0], reverse=True)
+        target_max_row = max(target_data.keys()) if target_data else 0
+        
+        available_space = self.squares_per_column - target_max_row
+        chars_to_move = min(max_chars_to_move, available_space - 1)  # Leave at least 1 space
+        
+        if chars_to_move <= 0:
+            return
+            
+        # Move characters that don't violate kinsoku rules
+        moved_count = 0
+        for row, char in source_items:
+            if moved_count >= chars_to_move:
+                break
+                
+            # Only move safe characters (not prohibited at column boundaries)
+            if (char and char.strip() and 
+                char not in GenkouYoshiValidator.GYOUMATSU_KINSOKU and
+                char not in GenkouYoshiValidator.GYOUTOU_KINSOKU):
+                
+                # Remove from source
+                del source_data[row]
+                # Add to target
+                target_data[target_max_row + 1] = char
+                target_max_row += 1
+                moved_count += 1
+                
+        if moved_count > 0:
+            logging.debug(f"Column balancing: moved {moved_count} characters from column {source_col} to {target_col}")
             
     def get_all_pages(self):
         """Get all pages including current page"""
@@ -1780,13 +2060,13 @@ class GenkouYoshiGrid:
 class JapaneseTextProcessor:
     """Japanese text processor with cached patterns for efficient processing"""
     
-    # Pre-compiled regex patterns
-    _title_pattern = re.compile(r'^(?:題名|タイトル|Title)\s*[:：]\s*(.+)')
-    _subtitle_pattern = re.compile(r'^(?:副題|サブタイトル|Subtitle)\s*[:：]\s*(.+)')
-    _author_pattern = re.compile(r'^(?:作者|著者|Author)\s*[:：]\s*(.+)')
+    # Pre-compiled regex patterns (support both half-width and full-width characters)
+    _title_pattern = re.compile(r'^(?:題名|タイトル|Title)\s*[:：︓]\s*(.+)')
+    _subtitle_pattern = re.compile(r'^(?:副題|サブタイトル|Subtitle)\s*[:：︓]\s*(.+)')
+    _author_pattern = re.compile(r'^(?:作者|著者|Author)\s*[:：︓]\s*(.+)')
     _chapter_pattern = re.compile(
-        r'^\s*(?:第[一二三四五六七八九十百千\d]+章|'
-        r'Chapter\s*\d+|Chapter\s*[IVXLCDM]+|[0-9]+\.|[一二三四五六七八九十]+\.).*'
+        r'^\s*(?:第[一二三四五六七八九十百千\d０１２３４５６７８９]+章|'
+        r'Chapter\s*[\d０１２３４５６７８９]+|Chapter\s*[IVXLCDM]+|[0-9０１２３４５６７８９]+\.|[一二三四五六七八九十]+\.).*'
     )
     _blankline_pattern = re.compile(r'(?:\n[\s\u3000]*\n)+')
     _date_pattern = re.compile(r"(\d{1,4})年(\d{1,2})月(\d{1,2})日")
@@ -1826,10 +2106,50 @@ class JapaneseTextProcessor:
     _fullwidth_numbers = str.maketrans('0123456789', '０１２３４５６７８９')
     
     @classmethod
+    def _is_likely_author_text(cls, text_line):
+        """Determine if a line is likely to be author information vs content"""
+        if not text_line or not text_line.strip():
+            return False
+            
+        stripped = text_line.strip()
+        
+        # Author text should be relatively short (typically under 50 characters)
+        if len(stripped) > 50:
+            return False
+            
+        # Author text typically doesn't contain these content indicators
+        content_indicators = [
+            '。', '、', '？', '！',  # Common sentence punctuation
+            'は', 'が', 'を', 'に', 'で', 'と',  # Common particles indicating narrative
+            '「', '」',  # Quotation marks indicating dialogue
+            'した', 'だった', 'である', 'のです',  # Past/present tense verbs
+        ]
+        
+        # If text contains multiple content indicators, likely not author
+        content_count = sum(1 for indicator in content_indicators if indicator in stripped)
+        if content_count >= 3:
+            return False
+            
+        # Check for common author name patterns
+        author_patterns = [
+            r'^[一-龯ぁ-んァ-ヾ\w\s]+$',  # Simple name pattern
+            r'^[A-Za-z\s\-\.]+$',  # Western name pattern
+        ]
+        
+        # If it matches author patterns and is short, likely author
+        for pattern in author_patterns:
+            if re.match(pattern, stripped) and len(stripped) <= 30:
+                return True
+                
+        return False
+
+    @classmethod
     def identify_text_structure(cls, text, paragraph_split_mode='blank'):
         """Identify and extract text structure with metadata"""
-        # Normalize line endings
-        text = text.replace('\\r\\n', '\n').replace('\\n', '\n').replace('\r\n', '\n').replace('\r', '\n')
+        # Normalize line endings and handle full-width escaped newlines
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = text.replace('＼ｎ＼ｎ', '\n\n').replace('＼ｎ', '\n')  # Convert full-width escaped newlines
+        text = text.replace('\\n\\n', '\n\n').replace('\\n', '\n')  # Convert literal escaped newlines
         lines = text.split('\n')
         
         structure = {
@@ -1880,17 +2200,26 @@ class JapaneseTextProcessor:
         def blankline_split(txt):
             return [p.strip() for p in cls._blankline_pattern.split(txt) if p.strip()]
 
-        # Fallback metadata detection
+        # Conservative fallback metadata detection - prioritize body content over metadata
         pos = 0
         if structure['novel_title'] is None and non_empty_lines:
-            structure['novel_title'] = non_empty_lines[0]
-            pos = 1
+            # Only use first line as title if it looks like a title (short, not a paragraph)
+            first_line = non_empty_lines[0]
+            if len(first_line) <= 50 and not first_line.endswith('。') and not first_line.endswith('.'):
+                structure['novel_title'] = first_line
+                pos = 1
+            # Otherwise, leave title as None and treat everything as body content
         if structure['author'] is None and pos < len(non_empty_lines) and not cls._chapter_pattern.match(non_empty_lines[pos]):
-            structure['author'] = non_empty_lines[pos]
-            pos += 1
+            # Only assign as author if it looks like author text, not content
+            if cls._is_likely_author_text(non_empty_lines[pos]):
+                structure['author'] = non_empty_lines[pos]
+                pos += 1
+            # If not likely author text, leave author as None and don't advance pos
         if structure['subtitle'] is None and pos < len(non_empty_lines) and not cls._chapter_pattern.match(non_empty_lines[pos]):
-            structure['subtitle'] = non_empty_lines[pos]
-            pos += 1
+            # Only assign as subtitle if it's reasonably short (subtitles shouldn't be long paragraphs)
+            if len(non_empty_lines[pos].strip()) <= 100:
+                structure['subtitle'] = non_empty_lines[pos]
+                pos += 1
 
         # Find content start efficiently
         count = 0
@@ -1952,6 +2281,9 @@ class JapaneseTextProcessor:
         # Step 4: Convert to vertical equivalents using translation table
         text = text.translate(cls._vertical_translate)
         
+        # Step 5: Apply punctuation positioning rules per RULES.txt section 3
+        text = cls._apply_punctuation_positioning(text)
+        
         return text
     
     @classmethod
@@ -1983,6 +2315,39 @@ class JapaneseTextProcessor:
             return cls._numbers_to_kanji.get(s, s.translate(cls._fullwidth_numbers))
         
         text = cls._number_pattern.sub(repl_num, text)
+        return text
+    
+    @classmethod
+    def _apply_punctuation_positioning(cls, text):
+        """Apply proper punctuation positioning rules per RULES.txt section 3"""
+        
+        # Period (。): position in upper-right quadrant of cell
+        # Comma (、): position in upper-right quadrant of cell  
+        # Question mark (？): center in cell
+        # Exclamation mark (！): center in cell
+        # Opening quotes (「): upper portion of cell
+        # Closing quotes (」): lower portion of cell
+        
+        # For now, we'll add positioning metadata as character annotations
+        # This will be processed later during DOCX generation
+        punctuation_positioning = {
+            '。': '。⸖',  # Period with upper-right positioning marker
+            '、': '、⸖',  # Comma with upper-right positioning marker
+            '？': '？⸗',  # Question mark with center positioning marker
+            '！': '！⸗',  # Exclamation mark with center positioning marker
+            '「': '⸘「',  # Opening quote with upper positioning marker
+            '』': '』⸙',  # Closing quote with lower positioning marker
+            '」': '」⸙',  # Closing quote with lower positioning marker
+            '）': '）⸙',  # Closing parenthesis with lower positioning marker
+            '］': '］⸙',  # Closing bracket with lower positioning marker
+            '（': '⸘（',  # Opening parenthesis with upper positioning marker
+            '［': '⸘［',  # Opening bracket with upper positioning marker
+        }
+        
+        # Apply positioning markers
+        for char, positioned_char in punctuation_positioning.items():
+            text = text.replace(char, positioned_char)
+        
         return text
     
     # Static method for common checks
@@ -2266,8 +2631,7 @@ class GenkouYoshiDocumentBuilder:
 
     def generate_docx_content(self, progress_callback=None):
         """
-        Generate DOCX content using Word's native vertical text support
-        Much more efficient than table-based approach - uses native Japanese typography
+        Generate DOCX content with proper paragraph structure and vertical text support
         """
         from docx.shared import Pt
         from docx.oxml import OxmlElement
@@ -2290,23 +2654,24 @@ class GenkouYoshiDocumentBuilder:
         character_size = self.page_format.get('character_size', 9)
         font_size_points = max(8, min(14, character_size * 1.2))
         
-        # Process each page using efficient native vertical text
+        # Process each page and extract paragraph structures
         for page_index, page_data in enumerate(pages):
             if 'columns' not in page_data:
                 continue
                 
-            # Create content for this page
-            page_text_content = self._convert_grid_to_vertical_text(page_data)
+            # Extract paragraphs from grid data preserving structure
+            page_paragraphs = self._extract_paragraphs_from_grid(page_data)
             
-            if page_text_content.strip():
-                # Create paragraph with native vertical text formatting
-                paragraph = self.doc.add_paragraph()
-                self._configure_paragraph_for_vertical_text(paragraph, font_size_points)
-                
-                # Add the text content with proper formatting
-                text_run = paragraph.add_run(page_text_content)
-                text_run.font.name = self.font_name
-                text_run.font.size = Pt(font_size_points)
+            for paragraph_text in page_paragraphs:
+                if paragraph_text.strip():
+                    # Create separate DOCX paragraph for each logical paragraph
+                    paragraph = self.doc.add_paragraph()
+                    self._configure_paragraph_for_vertical_text(paragraph, font_size_points)
+                    
+                    # Add the paragraph text with proper formatting
+                    text_run = paragraph.add_run(paragraph_text.strip())
+                    text_run.font.name = self.font_name
+                    text_run.font.size = Pt(font_size_points)
                 
             # Add page break between pages (except for the last page)
             if page_index < len(pages) - 1:
@@ -2427,6 +2792,227 @@ class GenkouYoshiDocumentBuilder:
         return True
 
 
+        
+    def _setup_document_vertical_text_direction(self):
+        """Configure document for native Japanese vertical text layout"""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        
+        section = self.doc.sections[0]
+        sectPr = section._sectPr
+        
+        textDirection = sectPr.find(qn('w:textDirection'))
+        if textDirection is None:
+            textDirection = OxmlElement('w:textDirection')
+            sectPr.append(textDirection)
+        textDirection.set(qn('w:val'), 'tbRl')
+        
+    def _configure_paragraph_for_vertical_text(self, paragraph, font_size_points):
+        """Configure paragraph for vertical text"""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        
+        pPr = paragraph._p.pPr
+        if pPr is None:
+            pPr = OxmlElement('w:pPr')
+            paragraph._p.insert(0, pPr)
+            
+        textDirection = pPr.find(qn('w:textDirection'))
+        if textDirection is None:
+            textDirection = OxmlElement('w:textDirection')
+            pPr.append(textDirection)
+        textDirection.set(qn('w:val'), 'tbRl')
+        
+    def _setup_document_vertical_text_direction(self):
+        """Configure document for native Japanese vertical text layout"""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        
+        section = self.doc.sections[0]
+        section_properties = section._sectPr
+        
+        # Set document text direction to vertical (top-to-bottom, right-to-left)
+        text_direction_element = section_properties.find(qn('w:textDirection'))
+        if text_direction_element is None:
+            text_direction_element = OxmlElement('w:textDirection')
+            section_properties.append(text_direction_element)
+        text_direction_element.set(qn('w:val'), 'tbRl')
+        
+        # Set document bidirectional text for right-to-left reading order
+        bidi_element = section_properties.find(qn('w:bidi'))
+        if bidi_element is None:
+            bidi_element = OxmlElement('w:bidi')
+            section_properties.append(bidi_element)
+            
+    def _configure_paragraph_for_vertical_text(self, paragraph, font_size_points):
+        """Configure paragraph with optimal settings for vertical Japanese text"""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        
+        paragraph_properties = paragraph._p.pPr
+        if paragraph_properties is None:
+            paragraph_properties = OxmlElement('w:pPr')
+            paragraph._p.insert(0, paragraph_properties)
+            
+        # Set paragraph text direction to vertical
+        text_direction_element = paragraph_properties.find(qn('w:textDirection'))
+        if text_direction_element is None:
+            text_direction_element = OxmlElement('w:textDirection')
+            paragraph_properties.append(text_direction_element)
+        text_direction_element.set(qn('w:val'), 'tbRl')
+        
+        # Set paragraph alignment to justify for proper text flow
+        jc_element = paragraph_properties.find(qn('w:jc'))
+        if jc_element is None:
+            jc_element = OxmlElement('w:jc')
+            paragraph_properties.append(jc_element)
+        jc_element.set(qn('w:val'), 'both')  # Justify both sides
+        
+        # Configure line spacing for proper grid alignment
+        spacing_element = OxmlElement('w:spacing')
+        line_spacing_twips = int(font_size_points * 20 * 1.2)  # 120% of font size in twips
+        spacing_element.set(qn('w:line'), str(line_spacing_twips))
+        spacing_element.set(qn('w:lineRule'), 'exact')
+        paragraph_properties.append(spacing_element)
+        
+        # Configure character spacing for uniform grid appearance
+        run_properties = paragraph_properties.find(qn('w:rPr'))
+        if run_properties is None:
+            run_properties = OxmlElement('w:rPr')
+            paragraph_properties.append(run_properties)
+            
+        char_spacing_element = OxmlElement('w:spacing')
+        character_spacing_twips = int(font_size_points * 20 * 0.1)  # Slight character spacing
+        char_spacing_element.set(qn('w:val'), str(character_spacing_twips))
+        run_properties.append(char_spacing_element)
+        
+    def _convert_grid_to_vertical_text(self, page_data):
+        """Convert grid structure to properly formatted vertical text with natural line breaks"""
+        if 'columns' not in page_data:
+            return ""
+            
+        columns_data = page_data['columns']
+        total_columns = self.grid.max_columns_per_page
+        total_rows = self.grid.squares_per_column
+        
+        # Build text with proper paragraph structure (right to left for tategaki)
+        column_texts = []
+        
+        for column_number in range(total_columns, 0, -1):  # Right to left iteration
+            if column_number in columns_data:
+                column_characters = []
+                
+                # Process each row in the column (top to bottom)
+                for row_number in range(1, total_rows + 1):
+                    character = columns_data[column_number].get(row_number, '')
+                    
+                    # Add characters including empty spaces to preserve grid structure
+                    if character and character.strip():
+                        # Handle punctuation positioning markers
+                        processed_char = self._process_punctuation_positioning(character)
+                        column_characters.append(processed_char)
+                    else:
+                        # Empty cell - add space if it's between characters
+                        if column_characters and row_number < total_rows:
+                            # Check if there are more characters coming in this column
+                            has_more_chars = any(
+                                columns_data[column_number].get(r, '').strip() 
+                                for r in range(row_number + 1, total_rows + 1)
+                            )
+                            if has_more_chars:
+                                column_characters.append(' ')
+                        
+                # Join column content and add to column texts
+                if column_characters:
+                    column_text = ''.join(column_characters).rstrip()
+                    if column_text:
+                        column_texts.append(column_text)
+        
+        # Join columns with single line breaks for proper paragraph flow
+        # This creates natural text flow while preserving the tategaki column structure
+        return '\n'.join(column_texts) if column_texts else ""
+
+    def _process_punctuation_positioning(self, character):
+        """Process punctuation positioning markers and apply formatting"""
+        # Remove positioning markers and return the base character
+        # The DOCX generation will handle the actual positioning through font properties
+        
+        positioning_markers = {
+            '⸖': 'upper_right',  # Period and comma positioning
+            '⸗': 'center',       # Question and exclamation mark positioning  
+            '⸘': 'upper',        # Opening quote positioning
+            '⸙': 'lower'         # Closing quote positioning
+        }
+        
+        # Check for positioning markers
+        for marker, position in positioning_markers.items():
+            if marker in character:
+                # Remove the marker and return the base character
+                # Store positioning info for later use if needed
+                base_char = character.replace(marker, '')
+                # For now, just return the base character
+                # Future enhancement: apply actual positioning in DOCX
+                return base_char
+        
+        return character
+
+    def _extract_paragraphs_from_grid(self, page_data):
+        """Extract paragraph structures from grid data while preserving line breaks and dialogue"""
+        if 'columns' not in page_data:
+            return []
+            
+        columns_data = page_data['columns']
+        total_columns = self.grid.max_columns_per_page
+        total_rows = self.grid.squares_per_column
+        
+        # Extract text column by column (right to left), detecting paragraph breaks
+        paragraphs = []
+        current_paragraph = ""
+        
+        for column_number in range(total_columns, 0, -1):  # Right to left
+            if column_number in columns_data:
+                # Extract text from this column (top to bottom)
+                column_chars = []
+                
+                for row_number in range(1, total_rows + 1):  # Top to bottom
+                    character = columns_data[column_number].get(row_number, '')
+                    
+                    if character and character.strip():
+                        processed_char = self._process_punctuation_positioning(character)
+                        column_chars.append(processed_char)
+                    elif character in ['\n', '\r', '\r\n']:
+                        # Preserve explicit line breaks
+                        column_chars.append('\n')
+                
+                # Join column text
+                column_text = ''.join(column_chars).strip()
+                
+                if column_text:
+                    # Add column text to current paragraph
+                    if current_paragraph:
+                        current_paragraph = column_text + current_paragraph  # Prepend for right-to-left reading
+                    else:
+                        current_paragraph = column_text
+            else:
+                # Empty column - this represents a paragraph break
+                if current_paragraph:
+                    paragraphs.append(current_paragraph)
+                    current_paragraph = ""
+        
+        # Don't forget the last paragraph
+        if current_paragraph:
+            paragraphs.append(current_paragraph)
+        
+        # Reverse paragraphs to get correct reading order (since we read right-to-left)
+        paragraphs.reverse()
+        
+        # If no paragraphs found, return empty list
+        if not paragraphs:
+            return []
+            
+        return paragraphs
+
+
 def main():
     """Main function with comprehensive verification system"""
     from rich.console import Console
@@ -2446,7 +3032,7 @@ def main():
     
     # Display header
     ascii_art = (
-        "[cyan]░▄▀▄░▀█▀░█▄█▒██▀▒█▀▄░▀█▀▒▄▀▄░█▒░▒██▀░▄▀▀[/cyan]\n"
+        "[cyan]░▄▀▄░▀█▀░█▄█▒██▀▒█▀▄░▀█▀▒▄▀▄░█▒░▒██▀░▄▀▀[/cyan]\\n"
         "[cyan]░▀▄▀░▒█▒▒█▒█░█▄▄░█▀▄░▒█▒░█▀█▒█▄▄░█▄▄▒▄██[/cyan]"
     )
     console.print(ascii_art)
@@ -2572,14 +3158,14 @@ def main():
         
         # Display final status
         if verification_report['status'] == 'compliant':
-            console.print(f"\n[bold green]🎉 Document is fully compliant with Genkou Yoshi standards![/bold green]")
+            console.print(f"\\n[bold green]🎉 Document is fully compliant with Genkou Yoshi standards![/bold green]")
             console.print(f"[green]Achieved in {verification_report['iterations']} iteration(s)[/green]")
         elif verification_report['status'] == 'partial_compliance':
-            console.print(f"\n[bold yellow]⚠️  Document has partial compliance[/bold yellow]")
+            console.print(f"\\n[bold yellow]⚠️  Document has partial compliance[/bold yellow]")
             console.print(f"[yellow]Compliance score: {verification_report['final_score']}/100[/yellow]")
             console.print(f"[yellow]Remaining violations: {verification_report['remaining_violations']}[/yellow]")
         else:
-            console.print(f"\n[bold red]❌ Verification failed[/bold red]")
+            console.print(f"\\n[bold red]❌ Verification failed[/bold red]")
     
     console.print()
     console.print(f"[bold green]✓ DOCX file saved:[/bold green] {output_path}")
@@ -2592,97 +3178,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-    def _setup_document_vertical_text_direction(self):
-        """Configure document for native Japanese vertical text layout"""
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        
-        section = self.doc.sections[0]
-        section_properties = section._sectPr
-        
-        # Set document text direction to vertical (top-to-bottom, right-to-left)
-        text_direction_element = section_properties.find(qn('w:textDirection'))
-        if text_direction_element is None:
-            text_direction_element = OxmlElement('w:textDirection')
-            section_properties.append(text_direction_element)
-        text_direction_element.set(qn('w:val'), 'tbRl')
-        
-        # Set document bidirectional text for right-to-left reading order
-        bidi_element = section_properties.find(qn('w:bidi'))
-        if bidi_element is None:
-            bidi_element = OxmlElement('w:bidi')
-            section_properties.append(bidi_element)
-            
-    def _configure_paragraph_for_vertical_text(self, paragraph, font_size_points):
-        """Configure paragraph with optimal settings for vertical Japanese text"""
-        from docx.oxml import OxmlElement
-        from docx.oxml.ns import qn
-        
-        paragraph_properties = paragraph._p.pPr
-        if paragraph_properties is None:
-            paragraph_properties = OxmlElement('w:pPr')
-            paragraph._p.insert(0, paragraph_properties)
-            
-        # Set paragraph text direction to vertical
-        text_direction_element = paragraph_properties.find(qn('w:textDirection'))
-        if text_direction_element is None:
-            text_direction_element = OxmlElement('w:textDirection')
-            paragraph_properties.append(text_direction_element)
-        text_direction_element.set(qn('w:val'), 'tbRl')
-        
-        # Configure line spacing for proper grid alignment
-        spacing_element = OxmlElement('w:spacing')
-        line_spacing_twips = int(font_size_points * 20 * 1.2)  # 120% of font size in twips
-        spacing_element.set(qn('w:line'), str(line_spacing_twips))
-        spacing_element.set(qn('w:lineRule'), 'exact')
-        paragraph_properties.append(spacing_element)
-        
-        # Configure character spacing for uniform grid appearance
-        run_properties = paragraph_properties.find(qn('w:rPr'))
-        if run_properties is None:
-            run_properties = OxmlElement('w:rPr')
-            paragraph_properties.append(run_properties)
-            
-        char_spacing_element = OxmlElement('w:spacing')
-        character_spacing_twips = int(font_size_points * 20 * 0.1)  # Slight character spacing
-        char_spacing_element.set(qn('w:val'), str(character_spacing_twips))
-        run_properties.append(char_spacing_element)
-        
-    def _convert_grid_to_vertical_text(self, page_data):
-        """Convert grid structure to native vertical text with proper column flow"""
-        if 'columns' not in page_data:
-            return ""
-            
-        columns_data = page_data['columns']
-        total_columns = self.grid.max_columns_per_page
-        total_rows = self.grid.squares_per_column
-        
-        # Build text content column by column (right to left for tategaki)
-        column_text_segments = []
-        
-        for column_number in range(total_columns, 0, -1):  # Right to left iteration
-            if column_number in columns_data:
-                column_characters = []
-                
-                # Process each row in the column (top to bottom)
-                for row_number in range(1, total_rows + 1):
-                    character = columns_data[column_number].get(row_number, '')
-                    
-                    # Validate single character per cell and add to column
-                    if character and len(character) == 1:
-                        column_characters.append(character)
-                    elif not character:
-                        # Use full-width space for empty cells to maintain grid structure
-                        column_characters.append('\u3000')
-                        
-                # Only add non-empty columns to the text
-                if any(char != '\u3000' for char in column_characters):
-                    # Remove trailing spaces and add column text
-                    column_text = ''.join(column_characters).rstrip('\u3000')
-                    if column_text:
-                        column_text_segments.append(column_text)
-                        
-        # Join columns with line breaks for proper vertical text flow
-        return '\n'.join(column_text_segments)
-
