@@ -1249,8 +1249,8 @@ class InMemoryGridAnalyzer:
     def _get_page_dimensions(self) -> Dict:
         """Get page dimensions from page format"""
         return {
-            'page_width': self.page_format.get('page_width', 210),
-            'page_height': self.page_format.get('page_height', 297),
+            'page_width': self.page_format.get('width', 210),
+            'page_height': self.page_format.get('height', 297),
             'margins': self.page_format.get('margins', {
                 'top': 20, 'bottom': 20, 'inner': 25, 'outer': 20
             })
@@ -1786,7 +1786,7 @@ class GenkouYoshiGrid:
             
         # TATEGAKI FIX: Start from rightmost column and progress left
         self.current_column = self.max_columns_per_page
-        self.current_square = 1
+        self.current_square = 2  # Start at row 2 per genkou yoshi rules (first row empty)
         
         # Use list of lists for O(1) access
         self.current_page_grid = [['' for _ in range(self.squares_per_column)] 
@@ -1807,9 +1807,9 @@ class GenkouYoshiGrid:
         self.current_square += 1
         if self.current_square > self.squares_per_column:
             self.current_column -= 1  # TATEGAKI FIX: Move left in tategaki
-            self.current_square = 1
+            self.current_square = 2  # Start at row 2 per genkou yoshi rules (first row empty)
             
-    def advance_column(self, square_num=1):
+    def advance_column(self, square_num=2):
         """Move to the next column at specified square"""
         # TATEGAKI FIX: Move left (decrease column number)
         self.current_column -= 1
@@ -1825,7 +1825,7 @@ class GenkouYoshiGrid:
         """Skip a number of columns (for spacing)"""
         # TATEGAKI FIX: Skip left (decrease column number)
         self.current_column -= num_columns
-        self.current_square = 1
+        self.current_square = 2  # Start at row 2 per genkou yoshi rules (first row empty)
         
     def place_character(self, char):
         """Place a single character in the current grid position"""
@@ -1837,7 +1837,7 @@ class GenkouYoshiGrid:
         if self.current_column > self.max_columns_per_page:
             self.finish_page()
             self.current_column = self.max_columns_per_page
-            self.current_square = 1
+            self.current_square = 2  # Start at row 2 per genkou yoshi rules (first row empty)
             
         # TATEGAKI FIX: Map right-to-left column numbers to array indices
         col_idx = self.max_columns_per_page - self.current_column
@@ -1850,19 +1850,16 @@ class GenkouYoshiGrid:
             self.advance_square()
             
     def place_character_with_kinsoku(self, char):
-        """Place character with active kinsoku processing"""
-        # Check for column start violations (gyoutou kinsoku)
-        if (self.current_square == 1 and 
-            char in GenkouYoshiValidator.GYOUTOU_KINSOKU):
-            # Move this character and preceding context to previous column
-            self._handle_gyoutou_kinsoku_violation(char)
-            return
-            
-        # Check for column end violations (gyoumatsu kinsoku)
+        """Place character with simplified kinsoku processing"""
+        # Check for column end violations (gyoumatsu kinsoku) - move to next column
         if (self.current_square == self.squares_per_column and 
             char in GenkouYoshiValidator.GYOUMATSU_KINSOKU):
-            # Move to next column
             self.advance_column()
+            
+        # Check for column start violations (gyoutou kinsoku) - advance one square
+        if (self.current_square == 1 and  # Check actual first row
+            char in GenkouYoshiValidator.GYOUTOU_KINSOKU):
+            self.advance_square()  # Skip to next square in same column
             
         # Place the character normally
         self.place_character(char)
@@ -1901,13 +1898,19 @@ class GenkouYoshiGrid:
         self.place_character(char)
                 
     def place_text_batch(self, text):
-        """Place text as a batch for better performance"""
+        """Place text as a batch with basic genkou yoshi rules"""
         for char in text:
+            # Basic kinsoku processing - avoid prohibited characters at start of column
+            if (self.current_square == 2 and  # First usable row 
+                char in GenkouYoshiValidator.GYOUTOU_KINSOKU):
+                # Skip to next square in same column
+                self.current_square = 3
+                
             # Inline the character placement logic
             if self.current_column < 1:
                 self.finish_page()
                 self.current_column = self.max_columns_per_page
-                self.current_square = 1
+                self.current_square = 2  # Start at row 2 per genkou yoshi rules (first row empty)
                 
             # TATEGAKI FIX: Map right-to-left column numbers to array indices
             col_idx = self.max_columns_per_page - self.current_column
@@ -1920,7 +1923,7 @@ class GenkouYoshiGrid:
                 self.current_square += 1
                 if self.current_square > self.squares_per_column:
                     self.current_column -= 1  # TATEGAKI FIX: Move left in tategaki
-                    self.current_square = 1
+                    self.current_square = 2  # Start at row 2 per genkou yoshi rules (first row empty)
             
     def finish_page(self):
         """Finish current page and start a new one"""
