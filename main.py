@@ -2634,47 +2634,74 @@ class GenkouYoshiDocumentBuilder:
 
     def generate_docx_content(self, progress_callback=None):
         """
-        Generate DOCX content with proper paragraph structure and vertical text support
+        Generate DOCX content with actual genkou yoshi grid structure using tables
         """
-        from docx.shared import Pt
+        from docx.shared import Pt, Cm
         from docx.oxml import OxmlElement
         from docx.oxml.ns import qn
+        from docx.enum.table import WD_TABLE_ALIGNMENT
+        from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+        from genkou_helpers import configure_genkou_table, configure_genkou_cell
         
-        # Clear existing paragraphs
+        # Clear existing content
         while len(self.doc.paragraphs) > 0:
             p = self.doc.paragraphs[0]
             p._element.getparent().remove(p._element)
+            
+        # Clear existing tables
+        for table in self.doc.tables:
+            table._element.getparent().remove(table._element)
             
         # Validate grid data before generating DOCX
         pages = self.grid.get_all_pages()
         if not self._validate_grid_data(pages):
             raise ValueError("Grid data validation failed - cannot generate compliant DOCX")
             
-        # Configure document for native vertical text layout
+        # Configure document for vertical text layout
         self._setup_document_vertical_text_direction()
         
-        # Calculate optimal font size based on page format
+        # Calculate grid dimensions
+        columns = self.page_format['grid']['columns']
+        rows = self.page_format['grid']['rows']
         character_size = self.page_format.get('character_size', 9)
-        font_size_points = max(8, min(14, character_size * 1.2))
+        font_size_points = max(8, min(14, character_size * 1.0))  # Use actual character size
         
-        # Process each page and extract paragraph structures
+        # Calculate cell dimensions for genkou yoshi grid
+        cell_width = Cm(0.7)  # Standard genkou yoshi cell width
+        cell_height = Cm(0.7)  # Standard genkou yoshi cell height
+        
+        # Process each page and create grid table
         for page_index, page_data in enumerate(pages):
             if 'columns' not in page_data:
                 continue
                 
-            # Extract paragraphs from grid data preserving structure
-            page_paragraphs = self._extract_paragraphs_from_grid(page_data)
+            # Create table for genkou yoshi grid
+            table = self.doc.add_table(rows=rows, cols=columns)
+            table.alignment = WD_TABLE_ALIGNMENT.CENTER
             
-            for paragraph_text in page_paragraphs:
-                if paragraph_text.strip():
-                    # Create separate DOCX paragraph for each logical paragraph
-                    paragraph = self.doc.add_paragraph()
-                    self._configure_paragraph_for_vertical_text(paragraph, font_size_points)
+            # Configure table properties for genkou yoshi appearance
+            configure_genkou_table(table, cell_width, cell_height)
+            
+            # Fill table cells with characters from grid data
+            columns_data = page_data['columns']
+            
+            # Iterate through table cells (row by row, column by column)
+            for row_idx in range(rows):
+                for col_idx in range(columns):
+                    cell = table.cell(row_idx, col_idx)
                     
-                    # Add the paragraph text with proper formatting
-                    text_run = paragraph.add_run(paragraph_text.strip())
-                    text_run.font.name = self.font_name
-                    text_run.font.size = Pt(font_size_points)
+                    # Map table position to grid position
+                    # Grid columns are numbered right-to-left (tategaki)
+                    grid_column = columns - col_idx
+                    grid_row = row_idx + 1  # Grid rows are 1-indexed
+                    
+                    # Get character from grid data
+                    character = ''
+                    if grid_column in columns_data:
+                        character = columns_data[grid_column].get(grid_row, '')
+                    
+                    # Configure cell for vertical text
+                    configure_genkou_cell(cell, character, font_size_points, self.font_name)
                 
             # Add page break between pages (except for the last page)
             if page_index < len(pages) - 1:
