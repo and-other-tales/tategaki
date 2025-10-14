@@ -1,3 +1,4 @@
+# Copyright © 2025 PI & Other Tales Inc.. All Rights Reserved.
 """
 Helper methods for genkou yoshi table configuration
 """

@@ -1,4 +1,5 @@
-[![License: Proprietary](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE.md)
+<!-- Copyright © 2025 PI & Other Tales Inc.. All Rights Reserved. -->
+[![EULA](https://img.shields.io/badge/EULA-PI%20%26%20Other%20Tales%2C%20Inc.-purple)](https://othertales.co/eula)
 
 #OtherTales Tategaki
 ##Genkō Yōshi Tategaki Converter

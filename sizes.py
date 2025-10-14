@@ -1,3 +1,4 @@
+# Copyright © 2025 PI & Other Tales Inc.. All Rights Reserved.
 """
 Interactive page size selector for Genkō Yōshi Tategaki Converter
 Based on standard Japanese publishing formats
