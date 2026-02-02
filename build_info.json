@@ -1,9 +1,0 @@
-{
-  "build_number": 1760420024,
-  "generated_at": "2025-10-14T05:33:44.775476+00:00",
-  "compile_command": "/home/david/batchlicense/.venv/bin/python -m compileall cli_interface.py narrator_gpt.py",
-  "targets": [
-    "cli_interface.py",
-    "narrator_gpt.py"
-  ]
-}
