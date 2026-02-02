@@ -1,10 +1,9 @@
-<!-- Copyright © 2025 PI & Other Tales Inc.. All Rights Reserved. -->
-[![EULA](https://img.shields.io/badge/EULA-PI%20%26%20Other%20Tales%2C%20Inc.-purple)](https://othertales.co/eula)
-
 #OtherTales Tategaki
 ##Genkō Yōshi Tategaki Converter
 
-Convert Japanese plain text into a properly formatted vertical Genkō Yōshi (原稿用紙) DOCX, following authentic manuscript-paper rules (tategaki/縦書き).
+Python Script Experimentation on analysing left-right Japanese text for translation and adaptation projects, and evaluating efficiency of more traditional Genko Grid Rules - i.e. Dynamically and correctly placed Kana sizing, Identification of characters that fall foul of first-line Genko rules when publications are of set grid height.
+
+An Experiment in Converting Japanese plain text into a properly formatted vertical Genkō Yōshi (原稿用紙) DOCX, following authentic manuscript-paper rules (tategaki/縦書き).
 
 ## Features
 
