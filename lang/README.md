@@ -1,5 +1,4 @@
-<!-- Copyright © 2025 PI & Other Tales Inc.. All Rights Reserved. -->
-# Enhanced Tategaki Generator with Multi-LLM Support
+# Multi-LLM Agents for Tategaki / Genko Rule Processing Evaluation.
 
 This enhanced version of the Japanese Tategaki DOCX Generator adds AI-powered rule processing using LangGraph and supports multiple LLM providers.
 
