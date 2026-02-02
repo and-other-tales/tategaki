@@ -3,6 +3,8 @@
 
 Python Script Experimentation on analysing left-right Japanese text for translation and adaptation projects, and evaluating efficiency of more traditional Genko Grid Rules - i.e. Dynamically and correctly placed Kana sizing, Identification of characters that fall foul of first-line Genko rules when publications are of set grid height.
 
+## NOTE: Lang folder contains source built on Langchain that is designed to provide the same functionality as the local python parser scripts, but as an evaluator into LLM reasoning (Anthropic - for Thinking Models & Llama) to determine how each model would approach the same task, adhering to the same rules and language restrictions.
+
 An Experiment in Converting Japanese plain text into a properly formatted vertical Genkō Yōshi (原稿用紙) DOCX, following authentic manuscript-paper rules (tategaki/縦書き).
 
 ## Features
