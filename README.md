@@ -1,4 +1,6 @@
 # OtherTales Tategaki
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 ## Genkō Yōshi Tategaki Converter
 
 Python Script Experimentation on analysing left-right Japanese text for translation and adaptation projects, and evaluating efficiency of more traditional Genko Grid Rules - i.e. Dynamically and correctly placed Kana sizing, Identification of characters that fall foul of first-line Genko rules when publications are of set grid height.
